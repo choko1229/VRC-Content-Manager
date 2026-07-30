@@ -79,3 +79,36 @@ button.danger {
 .muted {
   color: var(--muted);
 }
+
+.success {
+  color: #1a7f37;
+}
+
+.item-form fieldset {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+}
+
+.item-form label {
+  display: block;
+  margin-bottom: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.item-form input[type="text"],
+.item-form input[type="url"],
+.item-form input[type="number"],
+.item-form input[type="date"],
+.item-form select,
+.item-form textarea {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  margin-top: 0.25rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}

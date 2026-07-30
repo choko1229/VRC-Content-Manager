@@ -35,6 +35,21 @@ def get_shop(db: Session, shop_id: int) -> Shop:
     return shop
 
 
+def get_or_create_shop(db: Session, *, name: str, url: str | None) -> Shop:
+    """Used by item ingest: free-text shop name, auto-registered like tags/avatars.
+
+    If a shop with this name already exists, it's reused as-is (its URL/memo
+    are not overwritten here -- use the Shops page to edit those).
+    """
+    name = name.strip()
+    shop = db.execute(select(Shop).where(Shop.name == name)).scalar_one_or_none()
+    if shop is None:
+        shop = Shop(name=name, url=url)
+        db.add(shop)
+        db.flush()
+    return shop
+
+
 def create_shop(db: Session, data: ShopCreate) -> ShopRead:
     shop = Shop(name=data.name, url=data.url, memo=data.memo)
     db.add(shop)

@@ -56,3 +56,19 @@ def test_delete_shop(db_session: Session) -> None:
 def test_delete_missing_shop_raises_not_found(db_session: Session) -> None:
     with pytest.raises(NotFoundError):
         shop_service.delete_shop(db_session, 999)
+
+
+def test_get_or_create_shop_creates_when_absent(db_session: Session) -> None:
+    shop = shop_service.get_or_create_shop(db_session, name="New Shop", url="https://example.com")
+
+    assert shop.id is not None
+    assert shop.name == "New Shop"
+
+
+def test_get_or_create_shop_reuses_existing_by_name(db_session: Session) -> None:
+    created = shop_service.create_shop(db_session, ShopCreate(name="Existing Shop", url="https://a.example"))
+
+    reused = shop_service.get_or_create_shop(db_session, name="Existing Shop", url="https://different.example")
+
+    assert reused.id == created.id
+    assert reused.url == "https://a.example"  # existing shop's URL is not overwritten
