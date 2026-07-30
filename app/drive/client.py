@@ -1,0 +1,47 @@
+"""DriveClient abstraction.
+
+All Drive access in the app goes through this Protocol so tests can run
+against FakeDriveClient (app/drive/fake_drive_client.py) with no network or
+live Google account involved. GoogleDriveClient (real implementation) and
+FakeDriveClient must both satisfy this interface exactly.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Protocol
+
+from app.drive.types import DriveFile
+
+
+class DriveClient(Protocol):
+    def get_or_create_folder(self, name: str, parent_id: str | None = None) -> str:
+        """Return the id of a folder named `name` under `parent_id` (root if None), creating it if absent."""
+        ...
+
+    def upload_file(
+        self,
+        *,
+        local_path: Path,
+        name: str,
+        parent_id: str,
+        mime_type: str | None = None,
+    ) -> DriveFile:
+        """Upload a new file. Returns the created DriveFile."""
+        ...
+
+    def update_file_content(self, *, file_id: str, local_path: Path, mime_type: str | None = None) -> DriveFile:
+        """Replace the content of an existing file in place."""
+        ...
+
+    def download_file(self, *, file_id: str, dest_path: Path) -> None:
+        """Download a file's content to a local path."""
+        ...
+
+    def get_metadata(self, file_id: str) -> DriveFile:
+        """Fetch current metadata (including modified_time) for a file."""
+        ...
+
+    def delete_file(self, file_id: str) -> None:
+        """Delete a file from Drive. Used for ingest-failure compensation."""
+        ...

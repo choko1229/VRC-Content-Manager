@@ -1,23 +1,33 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
+from app.api.routers import oauth as oauth_router
 from app.config import get_settings
 from app.db.migrate import run_migrations
+from app.db.session import get_sessionmaker
 from app.logging_conf import configure_logging
+from app.services import drive_sync_service
+from app.web.fragments import settings as settings_fragments
 from app.web.fragments import shops as shops_fragments
+from app.web.pages import settings as settings_pages
 from app.web.pages import shops as shops_pages
 
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+# Routes reachable even before first-run Drive setup is complete.
+_SETUP_ALLOWLIST_PREFIXES = ("/setup", "/oauth", "/static", "/healthz")
 
 
 @asynccontextmanager
@@ -25,11 +35,38 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.upload_tmp_dir.mkdir(parents=True, exist_ok=True)
-    # Phase 1: migrate whatever local DB is present. Phase 2 replaces this
-    # with the full Drive-backed bootstrap (download-or-create, then migrate).
-    run_migrations()
+
+    if drive_sync_service.needs_setup():
+        logger.warning(
+            "no local database found at %s; visit /setup to connect Google Drive", settings.local_db_path
+        )
+    else:
+        run_migrations()
+        try:
+            session_local = get_sessionmaker()
+            with session_local() as db:
+                await asyncio.to_thread(drive_sync_service.check_remote_drift, db)
+        except Exception:
+            logger.exception("startup Drive drift check failed (continuing with local copy)")
+
+    stop_event = asyncio.Event()
+    sync_task = asyncio.create_task(drive_sync_service.sync_loop(stop_event))
     logger.info("startup complete (data_dir=%s)", settings.data_dir)
+
     yield
+
+    stop_event.set()
+    try:
+        await asyncio.wait_for(sync_task, timeout=10)
+    except asyncio.TimeoutError:
+        logger.warning("sync loop did not stop within timeout; cancelling")
+        sync_task.cancel()
+
+    if drive_sync_service.is_dirty():
+        try:
+            await asyncio.wait_for(drive_sync_service.flush_now_async(), timeout=20)
+        except asyncio.TimeoutError:
+            logger.warning("shutdown Drive sync flush timed out; some recent changes may not be synced")
     logger.info("shutdown complete")
 
 
@@ -38,7 +75,17 @@ def create_app() -> FastAPI:
     configure_logging(settings.log_level)
 
     app = FastAPI(title="BOOTH Asset Manager", lifespan=lifespan)
+    app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    @app.middleware("http")
+    async def setup_gate(request: Request, call_next):
+        path = request.url.path
+        if path == "/" or any(path.startswith(prefix) for prefix in _SETUP_ALLOWLIST_PREFIXES):
+            return await call_next(request)
+        if drive_sync_service.needs_setup():
+            return RedirectResponse(url="/setup")
+        return await call_next(request)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -46,10 +93,15 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     async def index() -> RedirectResponse:
+        if drive_sync_service.needs_setup():
+            return RedirectResponse(url="/setup")
         return RedirectResponse(url="/shops")
 
     app.include_router(shops_pages.router)
     app.include_router(shops_fragments.router)
+    app.include_router(settings_pages.router)
+    app.include_router(settings_fragments.router)
+    app.include_router(oauth_router.router)
 
     return app
 

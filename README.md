@@ -10,11 +10,21 @@ BOOTHで購入したVRChatアバター素材(zip/unitypackage/vrm/fbx等)を個�
 ```bash
 uv sync
 cp .env.example .env
-# .env に Google OAuth クライアントID/シークレット等を設定(Phase 2以降で必要)
 uv run uvicorn app.main:app --reload
 ```
 
 `http://localhost:8000/healthz` が `{"status": "ok"}` を返せば起動確認OK。
+
+ローカルにデータベースファイル(`data/app.db`)が存在しない状態でアクセスすると `/setup` にリダイレクトされ、Google Driveへの接続を求められる(下記「Google OAuth設定」参照)。開発中にDrive接続なしでUIだけ触りたい場合は、先に `uv run alembic upgrade head` を実行してローカルDBだけ作成しておくと `/setup` を経由せずに動作する(Driveには未接続の状態として動く)。
+
+## Google OAuth設定
+
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成し、「Google Drive API」を有効化する。
+2. 「APIとサービス」→「認証情報」で OAuth クライアントID(種類: ウェブアプリケーション)を作成する。
+   - 承認済みのリダイレクトURI に `http://localhost:8000/oauth/google/callback` (本番では実際のURL)を追加する。
+3. 発行された クライアントID/シークレット を `.env` の `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` に設定する。
+4. `TOKEN_ENCRYPTION_KEY` と `SESSION_SECRET_KEY` を生成して設定する(`.env.example` にコマンド例あり)。
+5. アプリにアクセスすると `/setup` が表示されるので、Googleでログインして認可する。初回はDriveに新規データベースが作成される。ボリューム消失後の復旧など、既存のDriveデータベースを使う場合は先に `DRIVE_DB_FILE_ID` を設定してから認可する。
 
 ## テスト
 

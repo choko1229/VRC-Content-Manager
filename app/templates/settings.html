@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}設定 - BOOTH Asset Manager{% endblock %}
+{% block content %}
+<h1>設定</h1>
+
+<h2>Google Drive連携</h2>
+{% if connected %}
+  <p>状態: 接続済み {% if is_dirty %}<span class="field-error">(未同期の変更あり)</span>{% endif %}</p>
+  <p class="muted">Drive上のデータベースファイルID: {{ drive_db_file_id or "-" }}</p>
+  <p class="muted">最終同期: {{ last_pushed_at or "まだ同期していません" }}</p>
+  <p class="muted">自動同期間隔: {{ sync_interval_seconds }}秒(変更を検知してからのデバウンス間隔)</p>
+  <div id="sync-status"></div>
+  <button hx-post="/fragments/settings/sync-now" hx-target="#sync-status" hx-swap="innerHTML">今すぐ同期</button>
+  <p><a href="/oauth/google/start">Googleで再認可する</a></p>
+{% else %}
+  <p>状態: 未接続</p>
+  <p><a href="/oauth/google/start"><button type="button">Google Driveに接続</button></a></p>
+{% endif %}
+
+<p class="muted">
+  災害復旧用: このデータベースファイルIDを Pterodactyl の環境変数 <code>DRIVE_DB_FILE_ID</code> に設定しておくと、ボリュームを失った場合に復元できます。
+</p>
+{% endblock %}

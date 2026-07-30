@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import NotFoundError
 from app.models.shop import Shop
 from app.schemas.shop import ShopCreate, ShopRead, ShopUpdate
+from app.services import drive_sync_service
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ def create_shop(db: Session, data: ShopCreate) -> ShopRead:
     db.add(shop)
     db.commit()
     db.refresh(shop)
+    drive_sync_service.mark_dirty()
     logger.info("shop created id=%s name=%s", shop.id, shop.name)
     return _to_read(shop)
 
@@ -50,6 +52,7 @@ def update_shop(db: Session, shop_id: int, data: ShopUpdate) -> ShopRead:
     shop.memo = data.memo
     db.commit()
     db.refresh(shop)
+    drive_sync_service.mark_dirty()
     logger.info("shop updated id=%s", shop.id)
     return _to_read(shop)
 
@@ -58,4 +61,5 @@ def delete_shop(db: Session, shop_id: int) -> None:
     shop = get_shop(db, shop_id)
     db.delete(shop)
     db.commit()
+    drive_sync_service.mark_dirty()
     logger.info("shop deleted id=%s", shop_id)

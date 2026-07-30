@@ -11,7 +11,10 @@ from app.models import Base  # noqa: F401 - ensures all models are registered on
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers defaults to True, which would silently disable
+    # every logger the app already created before migrations ran at startup
+    # (each module's `logger = logging.getLogger(__name__)`). Keep them alive.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
