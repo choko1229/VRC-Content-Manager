@@ -1,0 +1,29 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# secrets / local config
+.env
+.env.local
+
+# local data (SQLite cache, uploaded temp files)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# uv
+uv.lock.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
