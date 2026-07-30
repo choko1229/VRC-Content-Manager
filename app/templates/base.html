@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}BOOTH Asset Manager{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script src="/static/js/htmx.min.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <nav>
+      <a href="/shops">ショップ</a>
+    </nav>
+  </header>
+  <main class="app-main">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

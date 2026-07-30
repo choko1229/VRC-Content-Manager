@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}ショップ一覧 - BOOTH Asset Manager{% endblock %}
+{% block content %}
+<h1>ショップ</h1>
+
+<form class="inline-form" hx-post="/fragments/shops" hx-target="#shop-list" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()">
+  <div>
+    <input type="text" name="name" placeholder="ショップ名" required maxlength="255">
+  </div>
+  <div>
+    <input type="url" name="url" placeholder="ショップURL(任意)" maxlength="1024">
+  </div>
+  <div>
+    <input type="text" name="memo" placeholder="メモ(任意)">
+  </div>
+  <button type="submit">追加</button>
+</form>
+
+<div id="shop-list">
+  {% include "shops/_table.html" %}
+</div>
+{% endblock %}
