@@ -53,7 +53,7 @@ def test_callback_returns_502_when_token_exchange_raises_unexpected_error(
 ) -> None:
     state = _obtain_state(oauth_client)
 
-    def _boom(*, code: str, state: str):
+    def _boom(*, code: str, state: str, code_verifier: str):
         raise RuntimeError("scope has changed")  # simulates an uncaught oauthlib error
 
     monkeypatch.setattr(oauth_service, "exchange_code_for_credentials", _boom)
@@ -71,7 +71,7 @@ def test_callback_returns_400_when_token_exchange_raises_app_error(
 
     state = _obtain_state(oauth_client)
 
-    def _boom(*, code: str, state: str):
+    def _boom(*, code: str, state: str, code_verifier: str):
         raise AppError("no refresh token")
 
     monkeypatch.setattr(oauth_service, "exchange_code_for_credentials", _boom)

@@ -67,30 +67,41 @@ def _client_config() -> dict:
     }
 
 
-def _build_flow(state: str | None = None) -> Flow:
+def _build_flow(state: str | None = None, code_verifier: str | None = None) -> Flow:
     config = get_instance_config()
     return Flow.from_client_config(
         _client_config(),
         scopes=SCOPES,
         state=state,
         redirect_uri=config.google_oauth_redirect_uri,
+        code_verifier=code_verifier,
     )
 
 
-def build_authorization_url() -> tuple[str, str]:
-    """Returns (authorization_url, state). Caller must keep `state` (e.g. in the session)
-    and pass it back to exchange_code_for_credentials for CSRF protection."""
+def build_authorization_url() -> tuple[str, str, str]:
+    """Returns (authorization_url, state, code_verifier).
+
+    google-auth-oauthlib enables PKCE by default and auto-generates a fresh
+    code_verifier per Flow instance. /start and /callback are two separate
+    HTTP requests and can't share a Python object, so both `state` (already
+    handled) and this `code_verifier` must be round-tripped through the
+    caller (the session) and passed back into exchange_code_for_credentials
+    -- otherwise Google's token endpoint rejects the exchange with
+    "invalid_grant: Missing code verifier" because the authorization request
+    included a code_challenge that the token request can't prove ownership
+    of.
+    """
     flow = _build_flow()
     auth_url, state = flow.authorization_url(
         access_type="offline",
         prompt="consent",  # guarantees a refresh_token even on repeat authorization
         include_granted_scopes="true",
     )
-    return auth_url, state
+    return auth_url, state, flow.code_verifier
 
 
-def exchange_code_for_credentials(*, code: str, state: str) -> Credentials:
-    flow = _build_flow(state=state)
+def exchange_code_for_credentials(*, code: str, state: str, code_verifier: str) -> Credentials:
+    flow = _build_flow(state=state, code_verifier=code_verifier)
     flow.fetch_token(code=code)
     credentials = flow.credentials
     if not credentials.refresh_token:

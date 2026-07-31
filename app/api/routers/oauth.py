@@ -26,23 +26,27 @@ logger = logging.getLogger(__name__)
 @router.get("/start")
 def start(request: Request):
     try:
-        auth_url, state = oauth_service.build_authorization_url()
+        auth_url, state, code_verifier = oauth_service.build_authorization_url()
     except oauth_service.OAuthNotConfiguredError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     request.session["oauth_state"] = state
+    request.session["oauth_code_verifier"] = code_verifier
     return RedirectResponse(url=auth_url)
 
 
 @router.get("/callback")
 async def callback(request: Request, code: str, state: str, db: Session = Depends(get_db)):
     expected_state = request.session.pop("oauth_state", None)
+    code_verifier = request.session.pop("oauth_code_verifier", None)
     if not expected_state or expected_state != state:
         raise HTTPException(status_code=400, detail="invalid OAuth state (possible CSRF or expired session)")
+    if not code_verifier:
+        raise HTTPException(status_code=400, detail="OAuthセッションの有効期限が切れました。/setup からやり直してください。")
 
     try:
         credentials = await run_in_threadpool(
-            oauth_service.exchange_code_for_credentials, code=code, state=state
+            oauth_service.exchange_code_for_credentials, code=code, state=state, code_verifier=code_verifier
         )
     except AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

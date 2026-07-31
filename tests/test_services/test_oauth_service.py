@@ -53,3 +53,41 @@ def test_save_credentials_keeps_prior_refresh_token_when_omitted(app_db_session:
     assert loaded is not None
     assert loaded.token == "access-new"
     assert loaded.refresh_token == "refresh-abc"
+
+
+def _configure_oauth_client(configured_settings) -> None:
+    from app.config import get_instance_config
+    from app.core.instance_config import save as save_instance_config
+
+    config = get_instance_config()
+    config.google_oauth_client_id = "test-client-id"
+    config.google_oauth_client_secret = "test-client-secret"
+    config.google_oauth_redirect_uri = "http://localhost:8000/oauth/google/callback"
+    save_instance_config(configured_settings.data_dir, config)
+
+
+def test_build_authorization_url_returns_a_code_verifier(configured_settings) -> None:
+    _configure_oauth_client(configured_settings)
+
+    auth_url, state, code_verifier = oauth_service.build_authorization_url()
+
+    assert auth_url.startswith("https://accounts.google.com/")
+    assert state
+    assert code_verifier
+    assert "code_challenge=" in auth_url  # PKCE is on; the verifier must round-trip to exchange
+
+
+def test_exchange_uses_the_code_verifier_it_was_given(configured_settings) -> None:
+    # Regression test: /start and /callback build separate Flow instances
+    # (two different HTTP requests), so the code_verifier generated during
+    # authorization_url() must be threaded through explicitly -- otherwise
+    # Google's token endpoint rejects the exchange with
+    # "invalid_grant: Missing code verifier". This checks the Flow object
+    # built for exchange actually carries the verifier, without hitting
+    # Google's real token endpoint.
+    _configure_oauth_client(configured_settings)
+    _, _, code_verifier = oauth_service.build_authorization_url()
+
+    flow = oauth_service._build_flow(state="some-state", code_verifier=code_verifier)
+
+    assert flow.code_verifier == code_verifier
