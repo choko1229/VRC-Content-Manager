@@ -10,6 +10,7 @@
       <th>価格</th>
       <th>タグ</th>
       <th>対応アバター</th>
+      <th></th>
     </tr>
   </thead>
   <tbody>
@@ -23,6 +24,7 @@
       <td>{{ item.price if item.price is not none else "" }}</td>
       <td>{{ item.tags | join(", ") }}</td>
       <td>{{ item.avatars | join(", ") }}</td>
+      <td><a href="/api/v1/items/{{ item.id }}/download">ダウンロード</a></td>
     </tr>
     {% endfor %}
   </tbody>

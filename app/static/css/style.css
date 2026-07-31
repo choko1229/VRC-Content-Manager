@@ -120,12 +120,21 @@ button.danger {
 }
 
 .item-card {
-  display: block;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
+}
+
+.item-card-link {
+  display: block;
   text-decoration: none;
   color: inherit;
+}
+
+.item-card-actions {
+  padding: 0.4rem 0.7rem 0.6rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
 }
 
 .item-card-thumb {

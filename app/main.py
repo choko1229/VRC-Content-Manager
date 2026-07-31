@@ -11,6 +11,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.api.routers import downloads as downloads_router
 from app.api.routers import oauth as oauth_router
 from app.config import get_settings
 from app.db.migrate import run_migrations
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_pages.router)
     app.include_router(settings_fragments.router)
     app.include_router(oauth_router.router)
+    app.include_router(downloads_router.router)
 
     return app
 

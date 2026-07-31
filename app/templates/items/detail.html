@@ -8,7 +8,10 @@
 <img src="/items/{{ item.id }}/thumbnail" alt="" class="detail-thumb">
 {% endif %}
 
-<p><a href="/items/{{ item.id }}/edit"><button type="button">編集</button></a></p>
+<p>
+  <a href="/items/{{ item.id }}/edit"><button type="button">編集</button></a>
+  <a href="/api/v1/items/{{ item.id }}/download"><button type="button">ダウンロード</button></a>
+</p>
 
 <h2>基本情報</h2>
 <table>

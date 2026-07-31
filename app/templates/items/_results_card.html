@@ -1,21 +1,26 @@
 {% if items %}
 <div class="item-card-grid">
   {% for item in items %}
-  <a class="item-card" href="/items/{{ item.id }}">
-    <div class="item-card-thumb">
-      {% if item.has_thumbnail %}
-        <img src="/items/{{ item.id }}/thumbnail" alt="">
-      {% else %}
-        <div class="item-card-thumb-placeholder">No Image</div>
-      {% endif %}
+  <div class="item-card">
+    <a href="/items/{{ item.id }}" class="item-card-link">
+      <div class="item-card-thumb">
+        {% if item.has_thumbnail %}
+          <img src="/items/{{ item.id }}/thumbnail" alt="">
+        {% else %}
+          <div class="item-card-thumb-placeholder">No Image</div>
+        {% endif %}
+      </div>
+      <div class="item-card-body">
+        <div class="item-card-name">{{ item.name }}{% if item.is_favorite %} ★{% endif %}</div>
+        <div class="muted">{{ item.shop_name or "" }}</div>
+        <div class="muted">{{ item.status_label or "" }}</div>
+        {% if item.tags %}<div class="item-card-tags">{% for t in item.tags %}<span class="chip">{{ t }}</span>{% endfor %}</div>{% endif %}
+      </div>
+    </a>
+    <div class="item-card-actions">
+      <a href="/api/v1/items/{{ item.id }}/download">ダウンロード</a>
     </div>
-    <div class="item-card-body">
-      <div class="item-card-name">{{ item.name }}{% if item.is_favorite %} ★{% endif %}</div>
-      <div class="muted">{{ item.shop_name or "" }}</div>
-      <div class="muted">{{ item.status_label or "" }}</div>
-      {% if item.tags %}<div class="item-card-tags">{% for t in item.tags %}<span class="chip">{{ t }}</span>{% endfor %}</div>{% endif %}
-    </div>
-  </a>
+  </div>
   {% endfor %}
 </div>
 {% else %}
