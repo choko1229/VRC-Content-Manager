@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}商品一覧 - BOOTH Asset Manager{% endblock %}
+{% block content %}
+<h1>商品一覧</h1>
+
+<form id="filter-form" class="inline-form" hx-get="/fragments/items" hx-target="#item-results" hx-trigger="change, submit">
+  <input type="hidden" name="view" id="view-input" value="{{ view }}">
+  <div>
+    <input type="text" name="q" placeholder="キーワード(商品名・メモ)" value="{{ filters.q }}">
+  </div>
+  <div>
+    <select name="shop_id">
+      <option value="">ショップ(すべて)</option>
+      {% for s in shops %}<option value="{{ s.id }}" {% if filters.shop_id == s.id|string %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <select name="status_code">
+      <option value="">ステータス(すべて)</option>
+      {% for s in statuses %}<option value="{{ s.code }}" {% if filters.status_code == s.code %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <input type="text" name="tags" list="tag-list" placeholder="タグ(カンマ区切り)" value="{{ filters.tags }}">
+    <datalist id="tag-list">{% for t in tag_names %}<option value="{{ t }}">{% endfor %}</datalist>
+  </div>
+  <div>
+    <input type="text" name="avatars" list="avatar-list" placeholder="対応アバター(カンマ区切り)" value="{{ filters.avatars }}">
+    <datalist id="avatar-list">{% for a in avatar_names %}<option value="{{ a }}">{% endfor %}</datalist>
+  </div>
+  <label><input type="checkbox" name="favorites_only" value="true" {% if filters.favorites_only %}checked{% endif %}> お気に入りのみ</label>
+  <button type="submit">検索</button>
+  <span>
+    <button type="button" id="view-card-btn">カード</button>
+    <button type="button" id="view-table-btn">テーブル</button>
+  </span>
+</form>
+
+<div id="item-results">
+  {% if view == "table" %}
+    {% include "items/_results_table.html" %}
+  {% else %}
+    {% include "items/_results_card.html" %}
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  var viewInput = document.getElementById("view-input");
+  var form = document.getElementById("filter-form");
+  function setView(view) {
+    viewInput.value = view;
+    localStorage.setItem("itemListView", view);
+    htmx.trigger(form, "submit");
+  }
+  document.getElementById("view-card-btn").addEventListener("click", function () { setView("card"); });
+  document.getElementById("view-table-btn").addEventListener("click", function () { setView("table"); });
+  var saved = localStorage.getItem("itemListView");
+  if (saved && saved !== viewInput.value) {
+    setView(saved);
+  }
+})();
+</script>
+{% endblock %}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,3 +40,84 @@ class ItemRead(BaseModel):
     has_thumbnail: bool
     tags: list[str]
     avatars: list[str]
+
+
+class ItemUpdate(BaseModel):
+    """Metadata-only edit -- the underlying file is not replaced here."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=255)
+    shop_name: str = Field(min_length=1, max_length=255)
+    shop_url: str | None = Field(default=None, max_length=1024)
+    product_url: str | None = Field(default=None, max_length=1024)
+    download_source_url: str | None = Field(default=None, max_length=1024)
+    purchase_date: date | None = None
+    download_date: date | None = None
+    price: int | None = Field(default=None, ge=0)
+    status_code: str | None = None
+    memo: str | None = None
+    is_favorite: bool = False
+    tags: list[str] = Field(default_factory=list)
+    avatars: list[str] = Field(default_factory=list)
+    commercial_use: TriState = TriState.UNKNOWN
+    modification_allowed: TriState = TriState.UNKNOWN
+    redistribution_allowed: TriState = TriState.UNKNOWN
+    credit_required: TriState = TriState.UNKNOWN
+    license_note: str | None = None
+
+
+class ItemSearchFilters(BaseModel):
+    keyword: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    avatars: list[str] = Field(default_factory=list)
+    shop_id: int | None = None
+    status_code: str | None = None
+    favorites_only: bool = False
+
+
+class ItemListRow(BaseModel):
+    id: int
+    name: str
+    shop_name: str | None
+    status_label: str | None
+    file_format: str | None
+    price: int | None
+    purchase_date: date | None
+    is_favorite: bool
+    has_thumbnail: bool
+    tags: list[str]
+    avatars: list[str]
+
+
+class UpdateHistoryRead(BaseModel):
+    id: int
+    checked_at: datetime
+    note: str | None
+
+
+class ItemDetail(BaseModel):
+    id: int
+    name: str
+    shop_id: int | None
+    shop_name: str | None
+    shop_url: str | None
+    product_url: str | None
+    download_source_url: str | None
+    purchase_date: date | None
+    download_date: date | None
+    price: int | None
+    file_format: str | None
+    status_code: str | None
+    status_label: str | None
+    memo: str | None
+    is_favorite: bool
+    has_thumbnail: bool
+    tags: list[str]
+    avatars: list[str]
+    commercial_use: TriState
+    modification_allowed: TriState
+    redistribution_allowed: TriState
+    credit_required: TriState
+    license_note: str | None
+    update_history: list[UpdateHistoryRead]

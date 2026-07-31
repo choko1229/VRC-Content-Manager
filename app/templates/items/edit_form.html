@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}商品編集 - BOOTH Asset Manager{% endblock %}
+{% block content %}
+<p><a href="/items/{{ item_id }}">← 詳細に戻る</a></p>
+<h1>商品編集</h1>
+
+{% if error %}
+<p class="field-error">{{ error }}</p>
+{% endif %}
+
+<form method="post" action="/items/{{ item_id }}/edit" class="item-form">
+  <fieldset>
+    <legend>基本情報</legend>
+    <label>商品名 *<br><input type="text" name="name" required maxlength="255" value="{{ form_values.get('name', '') }}"></label><br>
+    <label>ショップ名 *<br>
+      <input type="text" name="shop_name" list="shop-list" required maxlength="255" value="{{ form_values.get('shop_name', '') }}">
+      <datalist id="shop-list">{% for s in shops %}<option value="{{ s }}">{% endfor %}</datalist>
+    </label><br>
+    <label>ショップURL<br><input type="url" name="shop_url" maxlength="1024" value="{{ form_values.get('shop_url', '') }}"></label><br>
+    <label>商品ページURL<br><input type="url" name="product_url" maxlength="1024" value="{{ form_values.get('product_url', '') }}"></label><br>
+    <label>ダウンロード元URL<br><input type="url" name="download_source_url" maxlength="1024" value="{{ form_values.get('download_source_url', '') }}"></label><br>
+  </fieldset>
+
+  <fieldset>
+    <legend>購入情報</legend>
+    <label>購入日<br><input type="date" name="purchase_date" value="{{ form_values.get('purchase_date', '') }}"></label><br>
+    <label>ダウンロード日<br><input type="date" name="download_date" value="{{ form_values.get('download_date', '') }}"></label><br>
+    <label>価格(円)<br><input type="number" name="price" min="0" value="{{ form_values.get('price', '') }}"></label><br>
+    <label>ステータス<br>
+      <select name="status_code">
+        {% for s in statuses %}<option value="{{ s.code }}" {% if form_values.get('status_code') == s.code %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+      </select>
+    </label><br>
+  </fieldset>
+
+  <fieldset>
+    <legend>分類</legend>
+    <label>タグ(カンマ区切り)<br>
+      <input type="text" name="tags" list="tag-list" value="{{ form_values.get('tags', '') }}">
+      <datalist id="tag-list">{% for t in tag_names %}<option value="{{ t }}">{% endfor %}</datalist>
+    </label><br>
+    <label>対応アバター(カンマ区切り)<br>
+      <input type="text" name="avatars" list="avatar-list" value="{{ form_values.get('avatars', '') }}">
+      <datalist id="avatar-list">{% for a in avatar_names %}<option value="{{ a }}">{% endfor %}</datalist>
+    </label><br>
+    <label><input type="checkbox" name="is_favorite" value="true" {% if form_values.get('is_favorite') %}checked{% endif %}> お気に入り</label><br>
+  </fieldset>
+
+  <fieldset>
+    <legend>ライセンス</legend>
+    <label>商用利用
+      <select name="commercial_use">
+        <option value="unknown" {% if form_values.get('commercial_use', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
+        <option value="yes" {% if form_values.get('commercial_use') == 'yes' %}selected{% endif %}>可</option>
+        <option value="no" {% if form_values.get('commercial_use') == 'no' %}selected{% endif %}>不可</option>
+      </select>
+    </label>
+    <label>改変
+      <select name="modification_allowed">
+        <option value="unknown" {% if form_values.get('modification_allowed', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
+        <option value="yes" {% if form_values.get('modification_allowed') == 'yes' %}selected{% endif %}>可</option>
+        <option value="no" {% if form_values.get('modification_allowed') == 'no' %}selected{% endif %}>不可</option>
+      </select>
+    </label>
+    <label>再配布
+      <select name="redistribution_allowed">
+        <option value="unknown" {% if form_values.get('redistribution_allowed', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
+        <option value="yes" {% if form_values.get('redistribution_allowed') == 'yes' %}selected{% endif %}>可</option>
+        <option value="no" {% if form_values.get('redistribution_allowed') == 'no' %}selected{% endif %}>不可</option>
+      </select>
+    </label>
+    <label>クレジット表記
+      <select name="credit_required">
+        <option value="unknown" {% if form_values.get('credit_required', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
+        <option value="yes" {% if form_values.get('credit_required') == 'yes' %}selected{% endif %}>要</option>
+        <option value="no" {% if form_values.get('credit_required') == 'no' %}selected{% endif %}>不要</option>
+      </select>
+    </label><br>
+    <label>ライセンス備考<br><textarea name="license_note" rows="2">{{ form_values.get('license_note', '') }}</textarea></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>メモ</legend>
+    <label><textarea name="memo" rows="3">{{ form_values.get('memo', '') }}</textarea></label>
+  </fieldset>
+
+  <button type="submit">保存</button>
+</form>
+{% endblock %}

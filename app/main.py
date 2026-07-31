@@ -17,6 +17,7 @@ from app.db.migrate import run_migrations
 from app.db.session import get_sessionmaker
 from app.logging_conf import configure_logging
 from app.services import drive_sync_service
+from app.web.fragments import items as items_fragments
 from app.web.fragments import settings as settings_fragments
 from app.web.fragments import shops as shops_fragments
 from app.web.pages import items as items_pages
@@ -96,11 +97,12 @@ def create_app() -> FastAPI:
     async def index() -> RedirectResponse:
         if drive_sync_service.needs_setup():
             return RedirectResponse(url="/setup")
-        return RedirectResponse(url="/shops")
+        return RedirectResponse(url="/items")
 
     app.include_router(shops_pages.router)
     app.include_router(shops_fragments.router)
     app.include_router(items_pages.router)
+    app.include_router(items_fragments.router)
     app.include_router(settings_pages.router)
     app.include_router(settings_fragments.router)
     app.include_router(oauth_router.router)

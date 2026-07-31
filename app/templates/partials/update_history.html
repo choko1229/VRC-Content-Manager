@@ -1,0 +1,10 @@
+{% if error %}<p class="field-error">{{ error }}</p>{% endif %}
+{% if history %}
+<ul>
+  {% for h in history %}
+  <li>{{ h.checked_at.strftime("%Y-%m-%d %H:%M") }}{% if h.note %} - {{ h.note }}{% endif %}</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">更新チェック履歴はまだありません。</p>
+{% endif %}

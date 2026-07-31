@@ -16,18 +16,29 @@ import mimetypes
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
-from app.core.exceptions import DriveError
+from app.core.exceptions import DriveError, NotFoundError
 from app.drive import folder_layout
 from app.drive.client import DriveClient
+from app.models.avatar import Avatar
 from app.models.item import Item
 from app.models.item_file import FileRole, ItemFile
-from app.models.license import License
+from app.models.license import License, TriState
 from app.models.status import Status
-from app.schemas.item import ItemCreate, ItemRead
+from app.models.tag import Tag
+from app.models.update_history import UpdateHistory
+from app.schemas.item import (
+    ItemCreate,
+    ItemDetail,
+    ItemListRow,
+    ItemRead,
+    ItemSearchFilters,
+    ItemUpdate,
+    UpdateHistoryRead,
+)
 from app.services import avatar_service, drive_sync_service, oauth_service, shop_service, tag_service, thumbnail_service
 from app.services.upload_service import ValidatedUpload
 
@@ -52,6 +63,143 @@ def _to_read(item: Item) -> ItemRead:
         tags=sorted(t.name for t in item.tags),
         avatars=sorted(a.name for a in item.avatars),
     )
+
+
+def _to_list_row(item: Item) -> ItemListRow:
+    return ItemListRow(
+        id=item.id,
+        name=item.name,
+        shop_name=item.shop.name if item.shop else None,
+        status_label=item.status.label if item.status else None,
+        file_format=item.file_format,
+        price=item.price,
+        purchase_date=item.purchase_date,
+        is_favorite=item.is_favorite,
+        has_thumbnail=item.thumbnail_file is not None,
+        tags=sorted(t.name for t in item.tags),
+        avatars=sorted(a.name for a in item.avatars),
+    )
+
+
+def _to_detail(item: Item) -> ItemDetail:
+    license_ = item.license
+    history = sorted(item.update_history, key=lambda h: h.checked_at, reverse=True)
+    return ItemDetail(
+        id=item.id,
+        name=item.name,
+        shop_id=item.shop_id,
+        shop_name=item.shop.name if item.shop else None,
+        shop_url=item.shop.url if item.shop else None,
+        product_url=item.product_url,
+        download_source_url=item.download_source_url,
+        purchase_date=item.purchase_date,
+        download_date=item.download_date,
+        price=item.price,
+        file_format=item.file_format,
+        status_code=item.status.code if item.status else None,
+        status_label=item.status.label if item.status else None,
+        memo=item.memo,
+        is_favorite=item.is_favorite,
+        has_thumbnail=item.thumbnail_file is not None,
+        tags=sorted(t.name for t in item.tags),
+        avatars=sorted(a.name for a in item.avatars),
+        commercial_use=license_.commercial_use if license_ else TriState.UNKNOWN,
+        modification_allowed=license_.modification_allowed if license_ else TriState.UNKNOWN,
+        redistribution_allowed=license_.redistribution_allowed if license_ else TriState.UNKNOWN,
+        credit_required=license_.credit_required if license_ else TriState.UNKNOWN,
+        license_note=license_.note if license_ else None,
+        update_history=[UpdateHistoryRead(id=h.id, checked_at=h.checked_at, note=h.note) for h in history],
+    )
+
+
+_DETAIL_LOAD_OPTIONS = (
+    selectinload(Item.shop),
+    selectinload(Item.status),
+    selectinload(Item.tags),
+    selectinload(Item.avatars),
+    selectinload(Item.files),
+    selectinload(Item.license),
+    selectinload(Item.update_history),
+)
+
+
+def search_items(db: Session, filters: ItemSearchFilters) -> list[ItemListRow]:
+    stmt = select(Item).options(*_DETAIL_LOAD_OPTIONS)
+
+    if filters.keyword:
+        like = f"%{filters.keyword}%"
+        stmt = stmt.where(or_(Item.name.ilike(like), Item.memo.ilike(like)))
+    if filters.shop_id:
+        stmt = stmt.where(Item.shop_id == filters.shop_id)
+    if filters.status_code:
+        stmt = stmt.where(Item.status.has(Status.code == filters.status_code))
+    if filters.favorites_only:
+        stmt = stmt.where(Item.is_favorite.is_(True))
+    if filters.tags:
+        stmt = stmt.where(Item.tags.any(Tag.name.in_(filters.tags)))
+    if filters.avatars:
+        stmt = stmt.where(Item.avatars.any(Avatar.name.in_(filters.avatars)))
+
+    stmt = stmt.order_by(Item.created_at.desc())
+    items = db.execute(stmt).unique().scalars().all()
+    return [_to_list_row(item) for item in items]
+
+
+def get_item_detail(db: Session, item_id: int) -> ItemDetail:
+    item = db.execute(
+        select(Item).options(*_DETAIL_LOAD_OPTIONS).where(Item.id == item_id)
+    ).unique().scalar_one_or_none()
+    if item is None:
+        raise NotFoundError("Item", item_id)
+    return _to_detail(item)
+
+
+def update_item(db: Session, item_id: int, data: ItemUpdate) -> ItemRead:
+    item = db.get(Item, item_id)
+    if item is None:
+        raise NotFoundError("Item", item_id)
+
+    shop = shop_service.get_or_create_shop(db, name=data.shop_name, url=data.shop_url)
+    tags = tag_service.get_or_create_tags(db, data.tags)
+    avatars = avatar_service.get_or_create_avatars(db, data.avatars)
+    status = _resolve_status(db, data.status_code)
+
+    item.shop = shop
+    item.name = data.name
+    item.product_url = data.product_url
+    item.download_source_url = data.download_source_url
+    item.purchase_date = data.purchase_date
+    item.download_date = data.download_date
+    item.price = data.price
+    item.status = status
+    item.memo = data.memo
+    item.is_favorite = data.is_favorite
+    item.tags = tags
+    item.avatars = avatars
+
+    if item.license is None:
+        item.license = License(item_id=item.id)
+    item.license.commercial_use = data.commercial_use
+    item.license.modification_allowed = data.modification_allowed
+    item.license.redistribution_allowed = data.redistribution_allowed
+    item.license.credit_required = data.credit_required
+    item.license.note = data.license_note
+
+    db.commit()
+    db.refresh(item)
+    drive_sync_service.mark_dirty()
+    logger.info("item updated id=%s", item.id)
+    return _to_read(item)
+
+
+def add_update_check(db: Session, item_id: int, note: str | None) -> None:
+    item = db.get(Item, item_id)
+    if item is None:
+        raise NotFoundError("Item", item_id)
+    db.add(UpdateHistory(item_id=item.id, note=note))
+    db.commit()
+    drive_sync_service.mark_dirty()
+    logger.info("update check recorded for item id=%s", item.id)
 
 
 def _resolve_thumbnail(data: ItemCreate, thumbnail_upload: ValidatedUpload | None) -> _ResolvedThumbnail | None:

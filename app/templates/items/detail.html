@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ item.name }} - BOOTH Asset Manager{% endblock %}
+{% block content %}
+<p><a href="/items">← 一覧に戻る</a></p>
+<h1>{{ item.name }}{% if item.is_favorite %} ★{% endif %}</h1>
+
+{% if item.has_thumbnail %}
+<img src="/items/{{ item.id }}/thumbnail" alt="" class="detail-thumb">
+{% endif %}
+
+<p><a href="/items/{{ item.id }}/edit"><button type="button">編集</button></a></p>
+
+<h2>基本情報</h2>
+<table>
+  <tr><th>ショップ</th><td>{{ item.shop_name or "-" }}{% if item.shop_url %} (<a href="{{ item.shop_url }}" target="_blank" rel="noopener noreferrer">リンク</a>){% endif %}</td></tr>
+  <tr><th>商品ページ</th><td>{% if item.product_url %}<a href="{{ item.product_url }}" target="_blank" rel="noopener noreferrer">{{ item.product_url }}</a>{% else %}-{% endif %}</td></tr>
+  <tr><th>ダウンロード元</th><td>{% if item.download_source_url %}<a href="{{ item.download_source_url }}" target="_blank" rel="noopener noreferrer">{{ item.download_source_url }}</a>{% else %}-{% endif %}</td></tr>
+  <tr><th>購入日</th><td>{{ item.purchase_date or "-" }}</td></tr>
+  <tr><th>ダウンロード日</th><td>{{ item.download_date or "-" }}</td></tr>
+  <tr><th>価格</th><td>{{ item.price if item.price is not none else "-" }}</td></tr>
+  <tr><th>ファイル形式</th><td>{{ item.file_format or "-" }}</td></tr>
+  <tr><th>ステータス</th><td>{{ item.status_label or "-" }}</td></tr>
+  <tr><th>タグ</th><td>{{ item.tags | join(", ") or "-" }}</td></tr>
+  <tr><th>対応アバター</th><td>{{ item.avatars | join(", ") or "-" }}</td></tr>
+  <tr><th>メモ</th><td>{{ item.memo or "-" }}</td></tr>
+</table>
+
+<h2>ライセンス</h2>
+<table>
+  <tr><th>商用利用</th><td>{{ {"yes": "可", "no": "不可", "unknown": "不明"}[item.commercial_use.value] }}</td></tr>
+  <tr><th>改変</th><td>{{ {"yes": "可", "no": "不可", "unknown": "不明"}[item.modification_allowed.value] }}</td></tr>
+  <tr><th>再配布</th><td>{{ {"yes": "可", "no": "不可", "unknown": "不明"}[item.redistribution_allowed.value] }}</td></tr>
+  <tr><th>クレジット表記</th><td>{{ {"yes": "要", "no": "不要", "unknown": "不明"}[item.credit_required.value] }}</td></tr>
+  <tr><th>備考</th><td>{{ item.license_note or "-" }}</td></tr>
+</table>
+
+<h2>更新チェック履歴</h2>
+<form hx-post="/fragments/items/{{ item.id }}/update-check" hx-target="#update-history" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()">
+  <input type="text" name="note" placeholder="メモ(任意。例: v2.0公開を確認)" maxlength="255">
+  <button type="submit">更新チェックを記録</button>
+</form>
+<div id="update-history">
+  {% with history = item.update_history %}{% include "partials/update_history.html" %}{% endwith %}
+</div>
+{% endblock %}

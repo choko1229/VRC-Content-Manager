@@ -6,10 +6,12 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import NotFoundError
 from app.drive.fake_drive_client import _FOLDER_MIME_TYPE, FakeDriveClient
 from app.models.item import Item
 from app.models.item_file import FileRole
-from app.schemas.item import ItemCreate
+from app.models.license import TriState
+from app.schemas.item import ItemCreate, ItemSearchFilters, ItemUpdate
 from app.services import drive_sync_service, item_service, shop_service
 from app.services.upload_service import ValidatedUpload
 
@@ -122,3 +124,132 @@ def test_create_item_with_file_leaves_no_drive_orphan_on_upload_failure(
 
     items = app_db_session.execute(select(Item).where(Item.name == "Never Uploaded")).scalars().all()
     assert items == []
+
+
+def _create_item(
+    db: Session,
+    tmp_path: Path,
+    *,
+    name: str,
+    shop_name: str = "Shop",
+    tags: list[str] | None = None,
+    avatars: list[str] | None = None,
+    is_favorite: bool = False,
+    memo: str | None = None,
+    status_code: str | None = None,
+):
+    fake_client = FakeDriveClient()
+    upload = _make_upload(tmp_path, name=f"{name}.unitypackage")
+    data = ItemCreate(
+        name=name,
+        shop_name=shop_name,
+        tags=tags or [],
+        avatars=avatars or [],
+        is_favorite=is_favorite,
+        memo=memo,
+        status_code=status_code,
+    )
+    return item_service.create_item_with_file(db, data=data, primary_upload=upload, drive_client=fake_client)
+
+
+def test_search_items_filters_by_keyword(app_db_session: Session, tmp_path: Path) -> None:
+    _create_item(app_db_session, tmp_path, name="Cool Manuka Outfit")
+    _create_item(app_db_session, tmp_path, name="Something Else", memo="mentions manuka in memo")
+    _create_item(app_db_session, tmp_path, name="Unrelated Item")
+
+    results = item_service.search_items(app_db_session, ItemSearchFilters(keyword="manuka"))
+
+    names = {r.name for r in results}
+    assert names == {"Cool Manuka Outfit", "Something Else"}
+
+
+def test_search_items_filters_by_tag_and_avatar(app_db_session: Session, tmp_path: Path) -> None:
+    _create_item(app_db_session, tmp_path, name="A", tags=["衣装"], avatars=["Manuka"])
+    _create_item(app_db_session, tmp_path, name="B", tags=["衣装"], avatars=["Raptor"])
+    _create_item(app_db_session, tmp_path, name="C", tags=["ヘアー"], avatars=["Manuka"])
+
+    by_tag = item_service.search_items(app_db_session, ItemSearchFilters(tags=["衣装"]))
+    assert {r.name for r in by_tag} == {"A", "B"}
+
+    by_avatar = item_service.search_items(app_db_session, ItemSearchFilters(avatars=["Manuka"]))
+    assert {r.name for r in by_avatar} == {"A", "C"}
+
+    by_both = item_service.search_items(app_db_session, ItemSearchFilters(tags=["衣装"], avatars=["Manuka"]))
+    assert {r.name for r in by_both} == {"A"}
+
+
+def test_search_items_filters_by_shop_status_and_favorite(app_db_session: Session, tmp_path: Path) -> None:
+    a = _create_item(app_db_session, tmp_path, name="A", shop_name="ShopA", is_favorite=True, status_code="in_use")
+    _create_item(app_db_session, tmp_path, name="B", shop_name="ShopB", is_favorite=False, status_code="imported")
+
+    shop_a_id = app_db_session.get(Item, a.id).shop_id
+
+    by_shop = item_service.search_items(app_db_session, ItemSearchFilters(shop_id=shop_a_id))
+    assert {r.name for r in by_shop} == {"A"}
+
+    by_status = item_service.search_items(app_db_session, ItemSearchFilters(status_code="imported"))
+    assert {r.name for r in by_status} == {"B"}
+
+    favorites = item_service.search_items(app_db_session, ItemSearchFilters(favorites_only=True))
+    assert {r.name for r in favorites} == {"A"}
+
+
+def test_get_item_detail_includes_license_and_history(app_db_session: Session, tmp_path: Path) -> None:
+    created = _create_item(app_db_session, tmp_path, name="Detail Target", tags=["a"], avatars=["b"])
+
+    detail = item_service.get_item_detail(app_db_session, created.id)
+
+    assert detail.name == "Detail Target"
+    assert detail.commercial_use == TriState.UNKNOWN
+    assert detail.update_history == []
+
+
+def test_get_item_detail_raises_not_found_for_missing_item(app_db_session: Session) -> None:
+    with pytest.raises(NotFoundError):
+        item_service.get_item_detail(app_db_session, 999)
+
+
+def test_update_item_changes_metadata_and_associations(app_db_session: Session, tmp_path: Path) -> None:
+    created = _create_item(app_db_session, tmp_path, name="Original Name", shop_name="Old Shop", tags=["old"])
+
+    updated = item_service.update_item(
+        app_db_session,
+        created.id,
+        ItemUpdate(
+            name="New Name",
+            shop_name="New Shop",
+            tags=["new", "tags"],
+            avatars=["Avatar1"],
+            commercial_use=TriState.YES,
+        ),
+    )
+
+    assert updated.name == "New Name"
+    assert updated.shop_name == "New Shop"
+    assert sorted(updated.tags) == ["new", "tags"]
+    assert updated.avatars == ["Avatar1"]
+
+    detail = item_service.get_item_detail(app_db_session, created.id)
+    assert detail.commercial_use == TriState.YES
+
+
+def test_update_item_raises_not_found_for_missing_item(app_db_session: Session) -> None:
+    with pytest.raises(NotFoundError):
+        item_service.update_item(app_db_session, 999, ItemUpdate(name="X", shop_name="Y"))
+
+
+def test_add_update_check_records_history_entry(app_db_session: Session, tmp_path: Path) -> None:
+    created = _create_item(app_db_session, tmp_path, name="Tracked Item")
+
+    item_service.add_update_check(app_db_session, created.id, "v2.0が公開された")
+    item_service.add_update_check(app_db_session, created.id, None)
+
+    detail = item_service.get_item_detail(app_db_session, created.id)
+    assert len(detail.update_history) == 2
+    notes = {h.note for h in detail.update_history}
+    assert notes == {"v2.0が公開された", None}
+
+
+def test_add_update_check_raises_not_found_for_missing_item(app_db_session: Session) -> None:
+    with pytest.raises(NotFoundError):
+        item_service.add_update_check(app_db_session, 999, "note")
