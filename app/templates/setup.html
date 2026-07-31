@@ -1,47 +1,46 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}初回セットアップ - BOOTH Asset Manager{% endblock %}
 {% block content %}
-<h1><span class="icon" aria-hidden="true">rocket_launch</span>初回セットアップ</h1>
-<p>このツールはファイルの実体をGoogle Driveに、メタデータをSQLite(実体もDrive上)に保存します。開始するにはGoogle OAuthクライアントの登録とアカウント認可が必要です。</p>
+{{ ui.page_title("初回セットアップ", icon="rocket_launch") }}
+
+{% call ui.glass() %}
+<p class="text-slate-600 dark:text-slate-300 mb-2">このツールはファイルの実体をGoogle Driveに、メタデータをSQLite(実体もDrive上)に保存します。開始するにはGoogle OAuthクライアントの登録とアカウント認可が必要です。</p>
 
 {% if credentials_configured %}
-  <p class="muted">
-    すでにDrive上にデータベースがある場合(ボリュームの再作成など)は、先に <a href="/setup?edit=1">認証情報を編集</a> してデータベースファイルIDを入力してから認可してください。
+  <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
+    すでにDrive上にデータベースがある場合(ボリュームの再作成など)は、先に <a href="/setup?edit=1" class="text-accent dark:text-accent-dark hover:underline">認証情報を編集</a> してデータベースファイルIDを入力してから認可してください。
   </p>
-  <a href="/oauth/google/start" class="btn btn-primary"><span class="icon" aria-hidden="true">login</span>Googleでログインして開始</a>
+  {{ ui.btn("Googleでログインして開始", variant="primary", icon="login", href="/oauth/google/start") }}
 {% else %}
-  {% if error %}
-  <div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ error }}</div>
-  {% endif %}
+  {% if error %}{{ ui.alert(error, variant="error") }}{% endif %}
 
-  <p class="muted">
-    <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Google Cloud Console<span class="sr-only">(新しいタブで開く)</span></a> で「Google Drive API」を有効化し、OAuthクライアント(種類: ウェブアプリケーション)を作成してください。
+  <p class="text-sm text-slate-500 dark:text-slate-400 mb-6">
+    <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" class="text-accent dark:text-accent-dark hover:underline">Google Cloud Console<span class="sr-only">(新しいタブで開く)</span></a> で「Google Drive API」を有効化し、OAuthクライアント(種類: ウェブアプリケーション)を作成してください。
   </p>
 
-  <form method="post" action="/setup" class="item-form">
+  <form method="post" action="/setup" class="space-y-6">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <fieldset>
-      <legend>Google OAuthクライアント</legend>
-      <label for="s-client-id">Client ID<span class="required-badge">必須</span></label>
-      <input id="s-client-id" type="text" name="google_oauth_client_id" required value="{{ form_values.get('google_oauth_client_id', '') }}">
 
-      <label for="s-client-secret">Client Secret<span class="required-badge">必須</span></label>
-      <input id="s-client-secret" type="password" name="google_oauth_client_secret" required autocomplete="off">
+    <div>
+      <h2 class="text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">Google OAuthクライアント</h2>
+      <div class="grid gap-4 sm:grid-cols-2">
+        {{ ui.text_field("google_oauth_client_id", "Client ID", required=True, value=form_values.get('google_oauth_client_id', '')) }}
+        {{ ui.text_field("google_oauth_client_secret", "Client Secret", type="password", required=True) }}
+        {{ ui.text_field("google_oauth_redirect_uri", "リダイレクトURI", type="url", required=True, value=form_values.get('google_oauth_redirect_uri', ''), help_text="Google CloudのOAuthクライアント設定の「承認済みのリダイレクトURI」にこの値を追加してください。", extra="sm:col-span-2") }}
+      </div>
+    </div>
 
-      <label for="s-redirect-uri">リダイレクトURI<span class="required-badge">必須</span><br><span class="muted">Google CloudのOAuthクライアント設定の「承認済みのリダイレクトURI」にこの値を追加してください。</span></label>
-      <input id="s-redirect-uri" type="url" name="google_oauth_redirect_uri" required value="{{ form_values.get('google_oauth_redirect_uri', '') }}">
-    </fieldset>
+    <div>
+      <h2 class="text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">オプション</h2>
+      <div class="grid gap-4 sm:grid-cols-2">
+        {{ ui.text_field("app_login_password", "ログインパスワード", type="password", help_text="インターネットに公開する場合は設定を推奨します。") }}
+        {{ ui.text_field("drive_db_file_id", "既存のDriveデータベースファイルID", value=form_values.get('drive_db_file_id', ''), help_text="ボリューム消失後の復旧などで既存のデータベースを使う場合のみ入力してください。") }}
+      </div>
+    </div>
 
-    <fieldset>
-      <legend>オプション</legend>
-      <label for="s-login-password">ログインパスワード<br><span class="muted">インターネットに公開する場合は設定を推奨します。</span></label>
-      <input id="s-login-password" type="password" name="app_login_password" autocomplete="new-password">
-
-      <label for="s-drive-db-file-id">既存のDriveデータベースファイルID<br><span class="muted">ボリューム消失後の復旧などで既存のデータベースを使う場合のみ入力してください。</span></label>
-      <input id="s-drive-db-file-id" type="text" name="drive_db_file_id" value="{{ form_values.get('drive_db_file_id', '') }}">
-    </fieldset>
-
-    <button type="submit" class="btn btn-primary"><span class="icon" aria-hidden="true">login</span>保存してGoogleに接続</button>
+    {{ ui.btn("保存してGoogleに接続", variant="primary", icon="login", type="submit") }}
   </form>
 {% endif %}
+{% endcall %}
 {% endblock %}

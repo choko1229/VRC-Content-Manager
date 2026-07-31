@@ -44,7 +44,7 @@ def _form_context(db: Session, *, error: str | None = None, form_values: dict | 
         "shops": [s.name for s in shop_service.list_shops(db)],
         "tag_names": tag_service.list_tag_names(db),
         "avatar_names": avatar_service.list_avatar_names(db),
-        "statuses": statuses,
+        "status_options": [(s.code, s.label) for s in statuses],
         "allowed_extensions": ", ".join(sorted(DEFAULT_ALLOWED_EXTENSIONS)),
         "accept_extensions": ",".join(sorted(DEFAULT_ALLOWED_EXTENSIONS)),
         "max_upload_size_mb": app_config_service.get_max_upload_size_mb(db),
@@ -199,14 +199,16 @@ def list_items_page(request: Request, db: Session = Depends(get_db)):
     )
     items = item_service.search_items(db, filters)
     view = params.get("view", "card")
+    shops = shop_service.list_shops(db)
+    statuses = db.execute(select(Status).order_by(Status.sort_order)).scalars().all()
     return templates.TemplateResponse(
         request,
         "items/list.html",
         {
             "items": items,
             "view": view,
-            "shops": shop_service.list_shops(db),
-            "statuses": db.execute(select(Status).order_by(Status.sort_order)).scalars().all(),
+            "shop_options": [(str(s.id), s.name) for s in shops],
+            "status_options": [(s.code, s.label) for s in statuses],
             "tag_names": tag_service.list_tag_names(db),
             "avatar_names": avatar_service.list_avatar_names(db),
             "filters": {

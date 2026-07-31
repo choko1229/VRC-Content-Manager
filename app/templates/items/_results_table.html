@@ -1,35 +1,42 @@
+{% import "_macros.html" as ui %}
 {% if items %}
-<table>
-  <caption class="sr-only">商品一覧(テーブル表示)</caption>
-  <thead>
-    <tr>
-      <th scope="col"><span class="sr-only">お気に入り</span></th>
-      <th scope="col">商品名</th>
-      <th scope="col">ショップ</th>
-      <th scope="col">ステータス</th>
-      <th scope="col">形式</th>
-      <th scope="col">価格</th>
-      <th scope="col">タグ</th>
-      <th scope="col">対応アバター</th>
-      <th scope="col"><span class="sr-only">操作</span></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for item in items %}
-    <tr>
-      <td>{% if item.is_favorite %}<span class="icon favorite-indicator" role="img" aria-label="お気に入り">star</span>{% endif %}</td>
-      <td><a href="/items/{{ item.id }}">{{ item.name }}</a></td>
-      <td>{{ item.shop_name or "" }}</td>
-      <td>{{ item.status_label or "" }}</td>
-      <td>{{ item.file_format or "" }}</td>
-      <td>{{ item.price if item.price is not none else "" }}</td>
-      <td>{{ item.tags | join(", ") }}</td>
-      <td>{{ item.avatars | join(", ") }}</td>
-      <td><a href="/api/v1/items/{{ item.id }}/download" class="btn btn-secondary"><span class="icon" aria-hidden="true">download</span><span class="sr-only">{{ item.name }}を</span>ダウンロード</a></td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="overflow-x-auto rounded-2xl border border-white/60 dark:border-white/10 bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-slate-200/40 dark:shadow-black/20">
+  <table class="w-full text-sm">
+    <caption class="sr-only">商品一覧(テーブル表示)</caption>
+    <thead>
+      <tr class="border-b border-white/60 dark:border-white/10 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        <th scope="col" class="px-4 py-3"><span class="sr-only">お気に入り</span></th>
+        <th scope="col" class="px-4 py-3">商品名</th>
+        <th scope="col" class="px-4 py-3">ショップ</th>
+        <th scope="col" class="px-4 py-3">ステータス</th>
+        <th scope="col" class="px-4 py-3">形式</th>
+        <th scope="col" class="px-4 py-3">価格</th>
+        <th scope="col" class="px-4 py-3">タグ</th>
+        <th scope="col" class="px-4 py-3">対応アバター</th>
+        <th scope="col" class="px-4 py-3"><span class="sr-only">操作</span></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-white/50 dark:divide-white/5">
+      {% for item in items %}
+      <tr class="hover:bg-white/50 dark:hover:bg-white/5 transition">
+        <td class="px-4 py-3">{% if item.is_favorite %}<span class="icon text-amber-500" role="img" aria-label="お気に入り">star</span>{% endif %}</td>
+        <td class="px-4 py-3 font-medium"><a href="/items/{{ item.id }}" class="text-accent dark:text-accent-dark hover:underline">{{ item.name }}</a></td>
+        <td class="px-4 py-3">{{ item.shop_name or "" }}</td>
+        <td class="px-4 py-3">{{ item.status_label or "" }}</td>
+        <td class="px-4 py-3">{{ item.file_format or "" }}</td>
+        <td class="px-4 py-3">{{ item.price if item.price is not none else "" }}</td>
+        <td class="px-4 py-3">{{ item.tags | join(", ") }}</td>
+        <td class="px-4 py-3">{{ item.avatars | join(", ") }}</td>
+        <td class="px-4 py-3 text-right">
+          <a href="/api/v1/items/{{ item.id }}/download" class="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+            <span class="icon text-[1rem]" aria-hidden="true">download</span><span class="sr-only">{{ item.name }}を</span>ダウンロード
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% else %}
-<p class="muted">該当する商品がありません。</p>
+<p class="text-slate-500 dark:text-slate-400">該当する商品がありません。</p>
 {% endif %}

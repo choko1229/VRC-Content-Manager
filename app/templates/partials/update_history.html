@@ -1,10 +1,14 @@
-{% if error %}<div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ error }}</div>{% endif %}
+{% import "_macros.html" as ui %}
+{% if error %}{{ ui.alert(error, variant="error") }}{% endif %}
 {% if history %}
-<ul>
+<ul class="space-y-2 text-sm">
   {% for h in history %}
-  <li>{{ h.checked_at.strftime("%Y-%m-%d %H:%M") }}{% if h.note %} - {{ h.note }}{% endif %}</li>
+  <li class="flex items-start gap-2 rounded-xl bg-white/50 dark:bg-white/5 px-3 py-2">
+    <span class="icon text-accent dark:text-accent-dark text-[1.1rem]" aria-hidden="true">event_available</span>
+    <span><span class="font-semibold">{{ h.checked_at.strftime("%Y-%m-%d %H:%M") }}</span>{% if h.note %} - {{ h.note }}{% endif %}</span>
+  </li>
   {% endfor %}
 </ul>
 {% else %}
-<p class="muted">更新チェック履歴はまだありません。</p>
+<p class="text-slate-500 dark:text-slate-400 text-sm">更新チェック履歴はまだありません。</p>
 {% endif %}

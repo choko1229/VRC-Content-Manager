@@ -1,92 +1,75 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}設定 - BOOTH Asset Manager{% endblock %}
 {% block content %}
-<h1>設定</h1>
+{{ ui.page_title("設定", icon="settings") }}
 
-<h2>Google Drive連携</h2>
+{% call ui.glass(extra="mb-6") %}
+<h2 class="text-lg font-bold mb-3">Google Drive連携</h2>
 {% if connected %}
-  <div class="alert alert-success" role="status">
-    <span class="icon" aria-hidden="true">cloud_done</span>
-    接続済み{% if is_dirty %} <strong class="field-error">(未同期の変更あり)</strong>{% endif %}
-  </div>
-  <p class="muted">Drive上のデータベースファイルID: {{ drive_db_file_id or "-" }}</p>
-  <p class="muted">最終同期: {{ last_pushed_at or "まだ同期していません" }}</p>
-  <p class="muted">自動同期間隔: {{ sync_interval_seconds }}秒(変更を検知してからのデバウンス間隔)</p>
+  {{ ui.alert(("接続済み" ~ (" (未同期の変更あり)" if is_dirty else "")), variant="success" if not is_dirty else "error") }}
+  <p class="text-sm text-slate-500 dark:text-slate-400">Drive上のデータベースファイルID: {{ drive_db_file_id or "-" }}</p>
+  <p class="text-sm text-slate-500 dark:text-slate-400">最終同期: {{ last_pushed_at or "まだ同期していません" }}</p>
+  <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">自動同期間隔: {{ sync_interval_seconds }}秒(変更を検知してからのデバウンス間隔)</p>
   <div id="sync-status" aria-live="polite"></div>
-  <div class="btn-group">
-    <button type="button" class="btn btn-primary" hx-post="/fragments/settings/sync-now" hx-target="#sync-status" hx-swap="innerHTML">
-      <span class="icon" aria-hidden="true">sync</span>今すぐ同期
-    </button>
-    <a href="/oauth/google/start" class="btn btn-secondary"><span class="icon" aria-hidden="true">refresh</span>Googleで再認可する</a>
+  <div class="flex flex-wrap gap-3">
+    {{ ui.btn("今すぐ同期", variant="primary", icon="sync", type="button", attrs='hx-post="/fragments/settings/sync-now" hx-target="#sync-status" hx-swap="innerHTML"') }}
+    {{ ui.btn("Googleで再認可する", variant="secondary", icon="refresh", href="/oauth/google/start") }}
   </div>
 {% else %}
-  <div class="alert alert-error" role="status">
-    <span class="icon" aria-hidden="true">cloud_off</span>未接続
-  </div>
-  <a href="/oauth/google/start" class="btn btn-primary"><span class="icon" aria-hidden="true">login</span>Google Driveに接続</a>
+  {{ ui.alert("未接続", variant="error") }}
+  {{ ui.btn("Google Driveに接続", variant="primary", icon="login", href="/oauth/google/start") }}
 {% endif %}
 
-<p class="muted">
-  災害復旧用: このデータベースファイルIDを控えておくと、ボリュームを失った場合に <a href="/setup">初回セットアップ画面</a> で入力して復元できます。
+<p class="text-xs text-slate-500 dark:text-slate-400 mt-4">
+  災害復旧用: このデータベースファイルIDを控えておくと、ボリュームを失った場合に <a href="/setup" class="text-accent dark:text-accent-dark hover:underline">初回セットアップ画面</a> で入力して復元できます。
 </p>
+{% endcall %}
 
 {% if connected %}
-<h2>整合性チェック</h2>
-<p class="muted">登録済みファイルがDrive上で実際に見つかるかを確認します(取り込み失敗時の補償削除が失敗していた場合などに検出できます)。</p>
+{% call ui.glass(extra="mb-6") %}
+<h2 class="text-lg font-bold mb-3">整合性チェック</h2>
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-4">登録済みファイルがDrive上で実際に見つかるかを確認します(取り込み失敗時の補償削除が失敗していた場合などに検出できます)。</p>
 <div id="integrity-check-result" aria-live="polite"></div>
-<button type="button" class="btn btn-secondary" hx-post="/fragments/settings/integrity-check" hx-target="#integrity-check-result" hx-swap="innerHTML">
-  <span class="icon" aria-hidden="true">fact_check</span>チェック実行
-</button>
+{{ ui.btn("チェック実行", variant="secondary", icon="fact_check", type="button", attrs='hx-post="/fragments/settings/integrity-check" hx-target="#integrity-check-result" hx-swap="innerHTML"') }}
+{% endcall %}
 {% endif %}
 
-<h2>Google OAuthクライアント</h2>
-{% if oauth_error %}
-<div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ oauth_error }}</div>
-{% endif %}
-<form method="post" action="/settings/oauth-credentials" class="item-form">
+{% call ui.glass(extra="mb-6") %}
+<h2 class="text-lg font-bold mb-4">Google OAuthクライアント</h2>
+{% if oauth_error %}{{ ui.alert(oauth_error, variant="error") }}{% endif %}
+<form method="post" action="/settings/oauth-credentials" class="space-y-4">
   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-  <fieldset>
-    <legend>Client ID / Secret / リダイレクトURI</legend>
-    <label for="set-client-id">Client ID<span class="required-badge">必須</span></label>
-    <input id="set-client-id" type="text" name="google_oauth_client_id" required value="{{ google_oauth_client_id }}">
-
-    <label for="set-client-secret">Client Secret<br><span class="muted">変更する場合のみ入力してください。</span></label>
-    <input id="set-client-secret" type="password" name="google_oauth_client_secret" autocomplete="off">
-
-    <label for="set-redirect-uri">リダイレクトURI<span class="required-badge">必須</span></label>
-    <input id="set-redirect-uri" type="url" name="google_oauth_redirect_uri" required value="{{ google_oauth_redirect_uri }}">
-  </fieldset>
-  <button type="submit" class="btn btn-secondary"><span class="icon" aria-hidden="true">save</span>保存</button>
-</form>
-
-<h2>ログインパスワード</h2>
-{% if password_error %}
-<div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ password_error }}</div>
-{% endif %}
-<p class="muted">現在の状態: {% if app_login_password_set %}設定済み{% else %}未設定{% endif %}</p>
-<form method="post" action="/settings/login-password" class="item-form">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-  <div>
-    <label for="set-login-password">新しいパスワード<br><span class="muted">空欄で保存するとパスワード保護を解除します。</span></label>
-    <input id="set-login-password" type="password" name="app_login_password" autocomplete="new-password">
+  <div class="grid gap-4 sm:grid-cols-2">
+    {{ ui.text_field("google_oauth_client_id", "Client ID", required=True, value=google_oauth_client_id) }}
+    {{ ui.text_field("google_oauth_client_secret", "Client Secret", type="password", help_text="変更する場合のみ入力してください。") }}
+    {{ ui.text_field("google_oauth_redirect_uri", "リダイレクトURI", type="url", required=True, value=google_oauth_redirect_uri, extra="sm:col-span-2") }}
   </div>
-  <button type="submit" class="btn btn-secondary"><span class="icon" aria-hidden="true">save</span>保存</button>
+  {{ ui.btn("保存", variant="secondary", icon="save", type="submit") }}
 </form>
+{% endcall %}
 
-<h2>動作設定</h2>
-{% if operational_error %}
-<div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ operational_error }}</div>
-{% endif %}
-<form method="post" action="/settings/operational" class="item-form">
+{% call ui.glass(extra="mb-6") %}
+<h2 class="text-lg font-bold mb-4">ログインパスワード</h2>
+{% if password_error %}{{ ui.alert(password_error, variant="error") }}{% endif %}
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-4">現在の状態: {% if app_login_password_set %}設定済み{% else %}未設定{% endif %}</p>
+<form method="post" action="/settings/login-password" class="space-y-4">
   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-  <fieldset>
-    <legend>アップロード・同期</legend>
-    <label for="set-max-upload">アップロード上限(MB)</label>
-    <input id="set-max-upload" type="number" name="max_upload_size_mb" min="1" value="{{ max_upload_size_mb }}">
-
-    <label for="set-sync-interval">Drive自動同期間隔(秒)</label>
-    <input id="set-sync-interval" type="number" name="sync_interval_seconds" min="1" value="{{ sync_interval_seconds }}">
-  </fieldset>
-  <button type="submit" class="btn btn-secondary"><span class="icon" aria-hidden="true">save</span>保存</button>
+  {{ ui.text_field("app_login_password", "新しいパスワード", type="password", help_text="空欄で保存するとパスワード保護を解除します。") }}
+  {{ ui.btn("保存", variant="secondary", icon="save", type="submit") }}
 </form>
+{% endcall %}
+
+{% call ui.glass() %}
+<h2 class="text-lg font-bold mb-4">動作設定</h2>
+{% if operational_error %}{{ ui.alert(operational_error, variant="error") }}{% endif %}
+<form method="post" action="/settings/operational" class="space-y-4">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  <div class="grid gap-4 sm:grid-cols-2">
+    {{ ui.text_field("max_upload_size_mb", "アップロード上限(MB)", type="number", value=max_upload_size_mb, attrs='min="1"') }}
+    {{ ui.text_field("sync_interval_seconds", "Drive自動同期間隔(秒)", type="number", value=sync_interval_seconds, attrs='min="1"') }}
+  </div>
+  {{ ui.btn("保存", variant="secondary", icon="save", type="submit") }}
+</form>
+{% endcall %}
 {% endblock %}

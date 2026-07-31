@@ -15,6 +15,14 @@ BOOTH側の購入・ダウンロード操作は自動化しない — 取り込�
 - Drive経由でのファイルダウンロード(通常のブラウザダウンロードとして)
 - Google Drive⇔ローカルSQLiteの自動同期(デバウンス書き戻し、シャットダウン時フラッシュ、リモート競合検知)
 
+## UI
+
+サーバーサイドレンダリング(Jinja2 + HTMX、ビルドステップなし)。見た目は半透明・ぼかし(glassmorphism)を基調にした、Google Fonts(Noto Sans JP)+ Google Icons(Material Symbols Outlined)使用のUI。
+
+- CSSフレームワークは [Tailwind CSS](https://tailwindcss.com/)(CDN版、ビルド不要)。共通コンポーネント(ボタン・フォーム項目・カード・アラート等)は `app/templates/_macros.html` のJinjaマクロにまとめて重複を防いでいる。
+- アクセシビリティはWCAG 2.1 AAのコントラスト比(文字4.5:1・UI部品3:1)を全配色ペアで検証済み。全フォーム項目に`<label for>`、装飾アイコンに`aria-hidden`、フォーカスリング、44px以上のタップ領域、スキップリンクを実装。
+- 商品登録フォームのファイル選択はドラッグ&ドロップに対応(ネイティブの`<input type="file">`は常に表示・操作可能なままにしてあり、D&Dは拡張として動作するため、キーボード/スクリーンリーダー操作を損なわない)。
+
 ## 開発環境セットアップ
 
 ```bash

@@ -1,3 +1,2 @@
-<div class="alert {% if is_dirty %}alert-error{% else %}alert-success{% endif %}" role="status">
-  <span class="icon" aria-hidden="true">{{ 'sync_problem' if is_dirty else 'check_circle' }}</span>{{ message }}
-</div>
+{% import "_macros.html" as ui %}
+{{ ui.alert(message, variant="error" if is_dirty else "success") }}

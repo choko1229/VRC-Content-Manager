@@ -1,107 +1,65 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}商品編集 - BOOTH Asset Manager{% endblock %}
 {% block content %}
-<p><a href="/items/{{ item_id }}"><span class="icon" aria-hidden="true">arrow_back</span>詳細に戻る</a></p>
-<h1>商品編集</h1>
+<p class="mb-4"><a href="/items/{{ item_id }}" class="inline-flex items-center gap-1 text-sm font-semibold text-accent dark:text-accent-dark hover:underline"><span class="icon text-[1.1rem]" aria-hidden="true">arrow_back</span>詳細に戻る</a></p>
 
-{% if error %}
-<div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ error }}</div>
-{% endif %}
+{{ ui.page_title("商品編集", icon="edit") }}
 
-<form method="post" action="/items/{{ item_id }}/edit" class="item-form">
+{% if error %}{{ ui.alert(error, variant="error") }}{% endif %}
+
+<form method="post" action="/items/{{ item_id }}/edit" class="space-y-6">
   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-  <fieldset>
-    <legend>基本情報</legend>
-    <label for="f-name">商品名<span class="required-badge">必須</span></label>
-    <input id="f-name" type="text" name="name" required maxlength="255" value="{{ form_values.get('name', '') }}">
 
-    <label for="f-shop-name">ショップ名<span class="required-badge">必須</span></label>
-    <input id="f-shop-name" type="text" name="shop_name" list="shop-list" required maxlength="255" value="{{ form_values.get('shop_name', '') }}">
+  {% call ui.glass() %}
+  <h2 class="text-lg font-bold mb-4">基本情報</h2>
+  <div class="grid gap-4 sm:grid-cols-2">
+    {{ ui.text_field("name", "商品名", required=True, value=form_values.get('name', '')) }}
+    {{ ui.text_field("shop_name", "ショップ名", required=True, value=form_values.get('shop_name', ''), list_id="shop-list") }}
     <datalist id="shop-list">{% for s in shops %}<option value="{{ s }}">{% endfor %}</datalist>
+    {{ ui.text_field("shop_url", "ショップURL", type="url", value=form_values.get('shop_url', '')) }}
+    {{ ui.text_field("product_url", "商品ページURL", type="url", value=form_values.get('product_url', '')) }}
+    {{ ui.text_field("download_source_url", "ダウンロード元URL", type="url", value=form_values.get('download_source_url', ''), extra="sm:col-span-2") }}
+  </div>
+  {% endcall %}
 
-    <label for="f-shop-url">ショップURL</label>
-    <input id="f-shop-url" type="url" name="shop_url" maxlength="1024" value="{{ form_values.get('shop_url', '') }}">
+  {% call ui.glass() %}
+  <h2 class="text-lg font-bold mb-4">購入情報</h2>
+  <div class="grid gap-4 sm:grid-cols-2">
+    {{ ui.text_field("purchase_date", "購入日", type="date", value=form_values.get('purchase_date', '')) }}
+    {{ ui.text_field("download_date", "ダウンロード日", type="date", value=form_values.get('download_date', '')) }}
+    {{ ui.text_field("price", "価格(円)", type="number", value=form_values.get('price', ''), attrs='min="0"') }}
+    {{ ui.select_field("status_code", "ステータス", status_options, selected=form_values.get('status_code')) }}
+  </div>
+  {% endcall %}
 
-    <label for="f-product-url">商品ページURL</label>
-    <input id="f-product-url" type="url" name="product_url" maxlength="1024" value="{{ form_values.get('product_url', '') }}">
-
-    <label for="f-download-source-url">ダウンロード元URL</label>
-    <input id="f-download-source-url" type="url" name="download_source_url" maxlength="1024" value="{{ form_values.get('download_source_url', '') }}">
-  </fieldset>
-
-  <fieldset>
-    <legend>購入情報</legend>
-    <label for="f-purchase-date">購入日</label>
-    <input id="f-purchase-date" type="date" name="purchase_date" value="{{ form_values.get('purchase_date', '') }}">
-
-    <label for="f-download-date">ダウンロード日</label>
-    <input id="f-download-date" type="date" name="download_date" value="{{ form_values.get('download_date', '') }}">
-
-    <label for="f-price">価格(円)</label>
-    <input id="f-price" type="number" name="price" min="0" value="{{ form_values.get('price', '') }}">
-
-    <label for="f-status">ステータス</label>
-    <select id="f-status" name="status_code">
-      {% for s in statuses %}<option value="{{ s.code }}" {% if form_values.get('status_code') == s.code %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
-    </select>
-  </fieldset>
-
-  <fieldset>
-    <legend>分類</legend>
-    <label for="f-tags">タグ(カンマ区切り)</label>
-    <input id="f-tags" type="text" name="tags" list="tag-list" value="{{ form_values.get('tags', '') }}">
+  {% call ui.glass() %}
+  <h2 class="text-lg font-bold mb-4">分類</h2>
+  <div class="grid gap-4 sm:grid-cols-2 mb-3">
+    {{ ui.text_field("tags", "タグ(カンマ区切り)", value=form_values.get('tags', ''), list_id="tag-list") }}
     <datalist id="tag-list">{% for t in tag_names %}<option value="{{ t }}">{% endfor %}</datalist>
-
-    <label for="f-avatars">対応アバター(カンマ区切り)</label>
-    <input id="f-avatars" type="text" name="avatars" list="avatar-list" value="{{ form_values.get('avatars', '') }}">
+    {{ ui.text_field("avatars", "対応アバター(カンマ区切り)", value=form_values.get('avatars', ''), list_id="avatar-list") }}
     <datalist id="avatar-list">{% for a in avatar_names %}<option value="{{ a }}">{% endfor %}</datalist>
+  </div>
+  {{ ui.checkbox_field("is_favorite", "お気に入り", checked=form_values.get('is_favorite')) }}
+  {% endcall %}
 
-    <label class="checkbox-label" for="f-favorite">
-      <input id="f-favorite" type="checkbox" name="is_favorite" value="true" {% if form_values.get('is_favorite') %}checked{% endif %}>
-      お気に入り
-    </label>
-  </fieldset>
+  {% call ui.glass() %}
+  <h2 class="text-lg font-bold mb-4">ライセンス</h2>
+  <div class="grid gap-4 sm:grid-cols-2 mb-4">
+    {{ ui.select_field("commercial_use", "商用利用", [("unknown", "不明"), ("yes", "可"), ("no", "不可")], selected=form_values.get('commercial_use', 'unknown')) }}
+    {{ ui.select_field("modification_allowed", "改変", [("unknown", "不明"), ("yes", "可"), ("no", "不可")], selected=form_values.get('modification_allowed', 'unknown')) }}
+    {{ ui.select_field("redistribution_allowed", "再配布", [("unknown", "不明"), ("yes", "可"), ("no", "不可")], selected=form_values.get('redistribution_allowed', 'unknown')) }}
+    {{ ui.select_field("credit_required", "クレジット表記", [("unknown", "不明"), ("yes", "要"), ("no", "不要")], selected=form_values.get('credit_required', 'unknown')) }}
+  </div>
+  {{ ui.textarea_field("license_note", "ライセンス備考", value=form_values.get('license_note', ''), rows=2) }}
+  {% endcall %}
 
-  <fieldset>
-    <legend>ライセンス</legend>
-    <label for="f-commercial-use">商用利用</label>
-    <select id="f-commercial-use" name="commercial_use">
-      <option value="unknown" {% if form_values.get('commercial_use', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
-      <option value="yes" {% if form_values.get('commercial_use') == 'yes' %}selected{% endif %}>可</option>
-      <option value="no" {% if form_values.get('commercial_use') == 'no' %}selected{% endif %}>不可</option>
-    </select>
+  {% call ui.glass() %}
+  <h2 class="text-lg font-bold mb-4">メモ</h2>
+  {{ ui.textarea_field("memo", "メモ", value=form_values.get('memo', ''), rows=3) }}
+  {% endcall %}
 
-    <label for="f-modification">改変</label>
-    <select id="f-modification" name="modification_allowed">
-      <option value="unknown" {% if form_values.get('modification_allowed', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
-      <option value="yes" {% if form_values.get('modification_allowed') == 'yes' %}selected{% endif %}>可</option>
-      <option value="no" {% if form_values.get('modification_allowed') == 'no' %}selected{% endif %}>不可</option>
-    </select>
-
-    <label for="f-redistribution">再配布</label>
-    <select id="f-redistribution" name="redistribution_allowed">
-      <option value="unknown" {% if form_values.get('redistribution_allowed', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
-      <option value="yes" {% if form_values.get('redistribution_allowed') == 'yes' %}selected{% endif %}>可</option>
-      <option value="no" {% if form_values.get('redistribution_allowed') == 'no' %}selected{% endif %}>不可</option>
-    </select>
-
-    <label for="f-credit">クレジット表記</label>
-    <select id="f-credit" name="credit_required">
-      <option value="unknown" {% if form_values.get('credit_required', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
-      <option value="yes" {% if form_values.get('credit_required') == 'yes' %}selected{% endif %}>要</option>
-      <option value="no" {% if form_values.get('credit_required') == 'no' %}selected{% endif %}>不要</option>
-    </select>
-
-    <label for="f-license-note">ライセンス備考</label>
-    <textarea id="f-license-note" name="license_note" rows="2">{{ form_values.get('license_note', '') }}</textarea>
-  </fieldset>
-
-  <fieldset>
-    <legend>メモ</legend>
-    <label for="f-memo" class="sr-only">メモ</label>
-    <textarea id="f-memo" name="memo" rows="3">{{ form_values.get('memo', '') }}</textarea>
-  </fieldset>
-
-  <button type="submit" class="btn btn-primary"><span class="icon" aria-hidden="true">save</span>保存</button>
+  {{ ui.btn("保存", variant="primary", icon="save", type="submit") }}
 </form>
 {% endblock %}

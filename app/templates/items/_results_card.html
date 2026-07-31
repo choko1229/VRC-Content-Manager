@@ -1,31 +1,38 @@
+{% import "_macros.html" as ui %}
 {% if items %}
-<div class="item-card-grid">
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
   {% for item in items %}
-  <div class="item-card">
-    <a href="/items/{{ item.id }}" class="item-card-link">
-      <div class="item-card-thumb">
+  <div class="group rounded-3xl border border-white/60 dark:border-white/10 bg-white/75 dark:bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-slate-200/40 dark:shadow-black/20 overflow-hidden transition hover:shadow-xl hover:-translate-y-0.5">
+    <a href="/items/{{ item.id }}" class="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark rounded-t-3xl">
+      <div class="aspect-square bg-gradient-to-br from-white/40 to-white/10 dark:from-white/10 dark:to-transparent flex items-center justify-center overflow-hidden">
         {% if item.has_thumbnail %}
-          <img src="/items/{{ item.id }}/thumbnail" alt="">
+          <img src="/items/{{ item.id }}/thumbnail" alt="" class="w-full h-full object-cover">
         {% else %}
-          <div class="item-card-thumb-placeholder"><span class="icon" aria-hidden="true">image</span>No Image</div>
+          <div class="flex flex-col items-center gap-1 text-slate-400 dark:text-slate-500 text-xs">
+            <span class="icon text-3xl" aria-hidden="true">image</span>No Image
+          </div>
         {% endif %}
       </div>
-      <div class="item-card-body">
-        <div class="item-card-name">
-          {% if item.is_favorite %}<span class="icon" role="img" aria-label="お気に入り">star</span>{% endif %}
-          {{ item.name }}
+      <div class="p-4">
+        <div class="flex items-center gap-1 font-bold text-slate-900 dark:text-white truncate">
+          {% if item.is_favorite %}<span class="icon text-amber-500 text-[1.1rem]" role="img" aria-label="お気に入り">star</span>{% endif %}
+          <span class="truncate">{{ item.name }}</span>
         </div>
-        <div class="muted">{{ item.shop_name or "" }}</div>
-        <div class="muted">{{ item.status_label or "" }}</div>
-        {% if item.tags %}<div class="item-card-tags">{% for t in item.tags %}<span class="chip">{{ t }}</span>{% endfor %}</div>{% endif %}
+        <div class="text-sm text-slate-500 dark:text-slate-400 truncate">{{ item.shop_name or "" }}</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400">{{ item.status_label or "" }}</div>
+        {% if item.tags %}
+        <div class="mt-2 flex flex-wrap gap-1">
+          {% for t in item.tags %}{{ ui.chip(t) }}{% endfor %}
+        </div>
+        {% endif %}
       </div>
     </a>
-    <div class="item-card-actions">
-      <a href="/api/v1/items/{{ item.id }}/download" class="btn btn-secondary"><span class="icon" aria-hidden="true">download</span><span class="sr-only">{{ item.name }}を</span>ダウンロード</a>
+    <div class="px-4 pb-4">
+      {{ ui.btn("ダウンロード", variant="secondary", icon="download", href="/api/v1/items/" ~ item.id ~ "/download", extra="w-full") }}
     </div>
   </div>
   {% endfor %}
 </div>
 {% else %}
-<p class="muted">該当する商品がありません。</p>
+<p class="text-slate-500 dark:text-slate-400">該当する商品がありません。</p>
 {% endif %}

@@ -1,38 +1,41 @@
-{% if error %}<div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ error }}</div>{% endif %}
+{% import "_macros.html" as ui %}
+{% if error %}{{ ui.alert(error, variant="error") }}{% endif %}
 {% if shops %}
-<table>
-  <caption class="sr-only">登録済みショップ一覧</caption>
-  <thead>
-    <tr>
-      <th scope="col">ショップ名</th>
-      <th scope="col">URL</th>
-      <th scope="col">メモ</th>
-      <th scope="col">登録商品数</th>
-      <th scope="col"><span class="sr-only">操作</span></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for shop in shops %}
-    <tr>
-      <td>{{ shop.name }}</td>
-      <td>{% if shop.url %}<a href="{{ shop.url }}" target="_blank" rel="noopener noreferrer">{{ shop.url }}<span class="sr-only">(新しいタブで開く)</span></a>{% endif %}</td>
-      <td>{{ shop.memo or "" }}</td>
-      <td>{{ shop.item_count }}</td>
-      <td>
-        <button
-          type="button"
-          class="btn btn-danger"
-          hx-delete="/fragments/shops/{{ shop.id }}"
-          hx-target="#shop-list"
-          hx-swap="innerHTML"
-          hx-confirm="「{{ shop.name }}」を削除しますか？"
-          aria-label="「{{ shop.name }}」を削除"
-        ><span class="icon" aria-hidden="true">delete</span><span aria-hidden="true">削除</span></button>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="overflow-x-auto rounded-2xl border border-white/60 dark:border-white/10 bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-slate-200/40 dark:shadow-black/20">
+  <table class="w-full text-sm">
+    <caption class="sr-only">登録済みショップ一覧</caption>
+    <thead>
+      <tr class="border-b border-white/60 dark:border-white/10 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        <th scope="col" class="px-4 py-3">ショップ名</th>
+        <th scope="col" class="px-4 py-3">URL</th>
+        <th scope="col" class="px-4 py-3">メモ</th>
+        <th scope="col" class="px-4 py-3">登録商品数</th>
+        <th scope="col" class="px-4 py-3"><span class="sr-only">操作</span></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-white/50 dark:divide-white/5">
+      {% for shop in shops %}
+      <tr class="hover:bg-white/50 dark:hover:bg-white/5 transition">
+        <td class="px-4 py-3 font-medium">{{ shop.name }}</td>
+        <td class="px-4 py-3">{% if shop.url %}<a href="{{ shop.url }}" target="_blank" rel="noopener noreferrer" class="text-accent dark:text-accent-dark hover:underline">{{ shop.url }}<span class="sr-only">(新しいタブで開く)</span></a>{% endif %}</td>
+        <td class="px-4 py-3 text-slate-600 dark:text-slate-300">{{ shop.memo or "" }}</td>
+        <td class="px-4 py-3">{{ shop.item_count }}</td>
+        <td class="px-4 py-3 text-right">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-full text-xs font-semibold border border-danger/50 dark:border-danger-dark/50 text-danger dark:text-danger-dark hover:bg-danger hover:text-white dark:hover:bg-danger-dark dark:hover:text-slate-950 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger dark:focus-visible:outline-danger-dark"
+            hx-delete="/fragments/shops/{{ shop.id }}"
+            hx-target="#shop-list"
+            hx-swap="innerHTML"
+            hx-confirm="「{{ shop.name }}」を削除しますか？"
+            aria-label="「{{ shop.name }}」を削除"
+          ><span class="icon text-[1rem]" aria-hidden="true">delete</span><span aria-hidden="true">削除</span></button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% else %}
-<p class="muted">まだショップが登録されていません。</p>
+<p class="text-slate-500 dark:text-slate-400">まだショップが登録されていません。</p>
 {% endif %}
