@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token(request) }}">
   <title>{% block title %}BOOTH Asset Manager{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css">
   <script src="/static/js/htmx.min.js"></script>
   <script>
@@ -14,21 +18,22 @@
   </script>
 </head>
 <body>
+  <a href="#main-content" class="skip-link">メインコンテンツへスキップ</a>
   <header class="app-header">
-    <nav>
-      <a href="/items">商品一覧</a>
-      <a href="/items/new">商品登録</a>
-      <a href="/shops">ショップ</a>
-      <a href="/settings">設定</a>
+    <nav aria-label="メインナビゲーション">
+      <a href="/items"><span class="icon" aria-hidden="true">inventory_2</span>商品一覧</a>
+      <a href="/items/new"><span class="icon" aria-hidden="true">add_circle</span>商品登録</a>
+      <a href="/shops"><span class="icon" aria-hidden="true">storefront</span>ショップ</a>
+      <a href="/settings"><span class="icon" aria-hidden="true">settings</span>設定</a>
       {% if request.session.authenticated %}
-      <form method="post" action="/logout" style="display: inline;">
+      <form method="post" action="/logout" style="display: contents;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-        <button type="submit" style="border: none; background: none; padding: 0; font: inherit; cursor: pointer; text-decoration: underline;">ログアウト</button>
+        <button type="submit" class="logout-btn"><span class="icon" aria-hidden="true">logout</span>ログアウト</button>
       </form>
       {% endif %}
     </nav>
   </header>
-  <main class="app-main">
+  <main class="app-main" id="main-content">
     {% block content %}{% endblock %}
   </main>
 </body>

@@ -3,17 +3,20 @@
 {% block content %}
 <h1>ショップ</h1>
 
-<form class="inline-form" hx-post="/fragments/shops" hx-target="#shop-list" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()">
+<form class="inline-form" hx-post="/fragments/shops" hx-target="#shop-list" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()" aria-label="ショップ追加フォーム">
   <div>
-    <input type="text" name="name" placeholder="ショップ名" required maxlength="255">
+    <label for="shop-name">ショップ名<span class="required-badge">必須</span></label>
+    <input id="shop-name" type="text" name="name" required maxlength="255">
   </div>
   <div>
-    <input type="url" name="url" placeholder="ショップURL(任意)" maxlength="1024">
+    <label for="shop-url">ショップURL</label>
+    <input id="shop-url" type="url" name="url" maxlength="1024">
   </div>
   <div>
-    <input type="text" name="memo" placeholder="メモ(任意)">
+    <label for="shop-memo">メモ</label>
+    <input id="shop-memo" type="text" name="memo">
   </div>
-  <button type="submit">追加</button>
+  <button type="submit" class="btn btn-primary"><span class="icon" aria-hidden="true">add</span>追加</button>
 </form>
 
 <div id="shop-list">

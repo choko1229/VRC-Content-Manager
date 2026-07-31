@@ -7,18 +7,21 @@
         {% if item.has_thumbnail %}
           <img src="/items/{{ item.id }}/thumbnail" alt="">
         {% else %}
-          <div class="item-card-thumb-placeholder">No Image</div>
+          <div class="item-card-thumb-placeholder"><span class="icon" aria-hidden="true">image</span>No Image</div>
         {% endif %}
       </div>
       <div class="item-card-body">
-        <div class="item-card-name">{{ item.name }}{% if item.is_favorite %} ★{% endif %}</div>
+        <div class="item-card-name">
+          {% if item.is_favorite %}<span class="icon" role="img" aria-label="お気に入り">star</span>{% endif %}
+          {{ item.name }}
+        </div>
         <div class="muted">{{ item.shop_name or "" }}</div>
         <div class="muted">{{ item.status_label or "" }}</div>
         {% if item.tags %}<div class="item-card-tags">{% for t in item.tags %}<span class="chip">{{ t }}</span>{% endfor %}</div>{% endif %}
       </div>
     </a>
     <div class="item-card-actions">
-      <a href="/api/v1/items/{{ item.id }}/download">ダウンロード</a>
+      <a href="/api/v1/items/{{ item.id }}/download" class="btn btn-secondary"><span class="icon" aria-hidden="true">download</span><span class="sr-only">{{ item.name }}を</span>ダウンロード</a>
     </div>
   </div>
   {% endfor %}

@@ -4,95 +4,112 @@
 <h1>商品登録</h1>
 
 {% if created_name %}
-<p class="success">「{{ created_name }}」を登録しました。</p>
+<div class="alert alert-success" role="status"><span class="icon" aria-hidden="true">check_circle</span>「{{ created_name }}」を登録しました。</div>
 {% endif %}
 {% if error %}
-<p class="field-error">{{ error }}</p>
+<div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ error }}</div>
 {% endif %}
 
 <form method="post" action="/items/new" enctype="multipart/form-data" class="item-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
   <fieldset>
     <legend>基本情報</legend>
-    <label>商品名 *<br><input type="text" name="name" required maxlength="255" value="{{ form_values.get('name', '') }}"></label><br>
-    <label>ショップ名 *<br>
-      <input type="text" name="shop_name" list="shop-list" required maxlength="255" value="{{ form_values.get('shop_name', '') }}">
-      <datalist id="shop-list">{% for s in shops %}<option value="{{ s }}">{% endfor %}</datalist>
-    </label><br>
-    <label>ショップURL<br><input type="url" name="shop_url" maxlength="1024" value="{{ form_values.get('shop_url', '') }}"></label><br>
-    <label>商品ページURL<br><input type="url" name="product_url" maxlength="1024" value="{{ form_values.get('product_url', '') }}"></label><br>
-    <label>ダウンロード元URL<br><input type="url" name="download_source_url" maxlength="1024" value="{{ form_values.get('download_source_url', '') }}"></label><br>
+    <label for="f-name">商品名<span class="required-badge">必須</span></label>
+    <input id="f-name" type="text" name="name" required maxlength="255" value="{{ form_values.get('name', '') }}">
+
+    <label for="f-shop-name">ショップ名<span class="required-badge">必須</span></label>
+    <input id="f-shop-name" type="text" name="shop_name" list="shop-list" required maxlength="255" value="{{ form_values.get('shop_name', '') }}">
+    <datalist id="shop-list">{% for s in shops %}<option value="{{ s }}">{% endfor %}</datalist>
+
+    <label for="f-shop-url">ショップURL</label>
+    <input id="f-shop-url" type="url" name="shop_url" maxlength="1024" value="{{ form_values.get('shop_url', '') }}">
+
+    <label for="f-product-url">商品ページURL</label>
+    <input id="f-product-url" type="url" name="product_url" maxlength="1024" value="{{ form_values.get('product_url', '') }}">
+
+    <label for="f-download-source-url">ダウンロード元URL</label>
+    <input id="f-download-source-url" type="url" name="download_source_url" maxlength="1024" value="{{ form_values.get('download_source_url', '') }}">
   </fieldset>
 
   <fieldset>
     <legend>購入・ファイル情報</legend>
-    <label>購入日<br><input type="date" name="purchase_date" value="{{ form_values.get('purchase_date', '') }}"></label><br>
-    <label>ダウンロード日<br><input type="date" name="download_date" value="{{ form_values.get('download_date', '') }}"></label><br>
-    <label>価格(円)<br><input type="number" name="price" min="0" value="{{ form_values.get('price', '') }}"></label><br>
-    <label>ステータス<br>
-      <select name="status_code">
-        {% for s in statuses %}<option value="{{ s.code }}" {% if form_values.get('status_code') == s.code %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
-      </select>
-    </label><br>
-    <label>ファイル * (対応形式: {{ allowed_extensions }} / 上限{{ max_upload_size_mb }}MB)<br>
-      <input type="file" name="file" accept="{{ accept_extensions }}" required>
-    </label><br>
-    <label>サムネイル画像(任意。未指定時は商品ページURLからの自動取得を試みます)<br>
-      <input type="file" name="thumbnail" accept="image/png,image/jpeg">
-    </label><br>
+    <label for="f-purchase-date">購入日</label>
+    <input id="f-purchase-date" type="date" name="purchase_date" value="{{ form_values.get('purchase_date', '') }}">
+
+    <label for="f-download-date">ダウンロード日</label>
+    <input id="f-download-date" type="date" name="download_date" value="{{ form_values.get('download_date', '') }}">
+
+    <label for="f-price">価格(円)</label>
+    <input id="f-price" type="number" name="price" min="0" value="{{ form_values.get('price', '') }}">
+
+    <label for="f-status">ステータス</label>
+    <select id="f-status" name="status_code">
+      {% for s in statuses %}<option value="{{ s.code }}" {% if form_values.get('status_code') == s.code %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+    </select>
+
+    <label for="f-file">ファイル<span class="required-badge">必須</span><br><span class="muted">対応形式: {{ allowed_extensions }} / 上限{{ max_upload_size_mb }}MB</span></label>
+    <input id="f-file" type="file" name="file" accept="{{ accept_extensions }}" required>
+
+    <label for="f-thumbnail">サムネイル画像<br><span class="muted">任意。未指定時は商品ページURLからの自動取得を試みます</span></label>
+    <input id="f-thumbnail" type="file" name="thumbnail" accept="image/png,image/jpeg">
   </fieldset>
 
   <fieldset>
     <legend>分類</legend>
-    <label>タグ(カンマ区切り)<br>
-      <input type="text" name="tags" list="tag-list" value="{{ form_values.get('tags', '') }}">
-      <datalist id="tag-list">{% for t in tag_names %}<option value="{{ t }}">{% endfor %}</datalist>
-    </label><br>
-    <label>対応アバター(カンマ区切り)<br>
-      <input type="text" name="avatars" list="avatar-list" value="{{ form_values.get('avatars', '') }}">
-      <datalist id="avatar-list">{% for a in avatar_names %}<option value="{{ a }}">{% endfor %}</datalist>
-    </label><br>
-    <label><input type="checkbox" name="is_favorite" value="true" {% if form_values.get('is_favorite') %}checked{% endif %}> お気に入り</label><br>
+    <label for="f-tags">タグ(カンマ区切り)</label>
+    <input id="f-tags" type="text" name="tags" list="tag-list" value="{{ form_values.get('tags', '') }}">
+    <datalist id="tag-list">{% for t in tag_names %}<option value="{{ t }}">{% endfor %}</datalist>
+
+    <label for="f-avatars">対応アバター(カンマ区切り)</label>
+    <input id="f-avatars" type="text" name="avatars" list="avatar-list" value="{{ form_values.get('avatars', '') }}">
+    <datalist id="avatar-list">{% for a in avatar_names %}<option value="{{ a }}">{% endfor %}</datalist>
+
+    <label class="checkbox-label" for="f-favorite">
+      <input id="f-favorite" type="checkbox" name="is_favorite" value="true" {% if form_values.get('is_favorite') %}checked{% endif %}>
+      お気に入り
+    </label>
   </fieldset>
 
   <fieldset>
     <legend>ライセンス</legend>
-    <label>商用利用
-      <select name="commercial_use">
-        <option value="unknown" {% if form_values.get('commercial_use', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
-        <option value="yes" {% if form_values.get('commercial_use') == 'yes' %}selected{% endif %}>可</option>
-        <option value="no" {% if form_values.get('commercial_use') == 'no' %}selected{% endif %}>不可</option>
-      </select>
-    </label>
-    <label>改変
-      <select name="modification_allowed">
-        <option value="unknown" {% if form_values.get('modification_allowed', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
-        <option value="yes" {% if form_values.get('modification_allowed') == 'yes' %}selected{% endif %}>可</option>
-        <option value="no" {% if form_values.get('modification_allowed') == 'no' %}selected{% endif %}>不可</option>
-      </select>
-    </label>
-    <label>再配布
-      <select name="redistribution_allowed">
-        <option value="unknown" {% if form_values.get('redistribution_allowed', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
-        <option value="yes" {% if form_values.get('redistribution_allowed') == 'yes' %}selected{% endif %}>可</option>
-        <option value="no" {% if form_values.get('redistribution_allowed') == 'no' %}selected{% endif %}>不可</option>
-      </select>
-    </label>
-    <label>クレジット表記
-      <select name="credit_required">
-        <option value="unknown" {% if form_values.get('credit_required', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
-        <option value="yes" {% if form_values.get('credit_required') == 'yes' %}selected{% endif %}>要</option>
-        <option value="no" {% if form_values.get('credit_required') == 'no' %}selected{% endif %}>不要</option>
-      </select>
-    </label><br>
-    <label>ライセンス備考<br><textarea name="license_note" rows="2">{{ form_values.get('license_note', '') }}</textarea></label>
+    <label for="f-commercial-use">商用利用</label>
+    <select id="f-commercial-use" name="commercial_use">
+      <option value="unknown" {% if form_values.get('commercial_use', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
+      <option value="yes" {% if form_values.get('commercial_use') == 'yes' %}selected{% endif %}>可</option>
+      <option value="no" {% if form_values.get('commercial_use') == 'no' %}selected{% endif %}>不可</option>
+    </select>
+
+    <label for="f-modification">改変</label>
+    <select id="f-modification" name="modification_allowed">
+      <option value="unknown" {% if form_values.get('modification_allowed', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
+      <option value="yes" {% if form_values.get('modification_allowed') == 'yes' %}selected{% endif %}>可</option>
+      <option value="no" {% if form_values.get('modification_allowed') == 'no' %}selected{% endif %}>不可</option>
+    </select>
+
+    <label for="f-redistribution">再配布</label>
+    <select id="f-redistribution" name="redistribution_allowed">
+      <option value="unknown" {% if form_values.get('redistribution_allowed', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
+      <option value="yes" {% if form_values.get('redistribution_allowed') == 'yes' %}selected{% endif %}>可</option>
+      <option value="no" {% if form_values.get('redistribution_allowed') == 'no' %}selected{% endif %}>不可</option>
+    </select>
+
+    <label for="f-credit">クレジット表記</label>
+    <select id="f-credit" name="credit_required">
+      <option value="unknown" {% if form_values.get('credit_required', 'unknown') == 'unknown' %}selected{% endif %}>不明</option>
+      <option value="yes" {% if form_values.get('credit_required') == 'yes' %}selected{% endif %}>要</option>
+      <option value="no" {% if form_values.get('credit_required') == 'no' %}selected{% endif %}>不要</option>
+    </select>
+
+    <label for="f-license-note">ライセンス備考</label>
+    <textarea id="f-license-note" name="license_note" rows="2">{{ form_values.get('license_note', '') }}</textarea>
   </fieldset>
 
   <fieldset>
     <legend>メモ</legend>
-    <label><textarea name="memo" rows="3">{{ form_values.get('memo', '') }}</textarea></label>
+    <label for="f-memo" class="sr-only">メモ</label>
+    <textarea id="f-memo" name="memo" rows="3">{{ form_values.get('memo', '') }}</textarea>
   </fieldset>
 
-  <button type="submit">登録</button>
+  <button type="submit" class="btn btn-primary"><span class="icon" aria-hidden="true">save</span>登録</button>
 </form>
 {% endblock %}

@@ -3,40 +3,59 @@
 {% block content %}
 <h1>商品一覧</h1>
 
-<form id="filter-form" class="inline-form" hx-get="/fragments/items" hx-target="#item-results" hx-trigger="change, submit">
+<form id="filter-form" class="inline-form" hx-get="/fragments/items" hx-target="#item-results" hx-trigger="change, submit" aria-label="商品検索・絞り込み">
   <input type="hidden" name="view" id="view-input" value="{{ view }}">
   <div>
-    <input type="text" name="q" placeholder="キーワード(商品名・メモ)" value="{{ filters.q }}">
+    <label for="filter-q">キーワード</label>
+    <input id="filter-q" type="text" name="q" placeholder="商品名・メモ" value="{{ filters.q }}">
   </div>
   <div>
-    <select name="shop_id">
-      <option value="">ショップ(すべて)</option>
+    <label for="filter-shop">ショップ</label>
+    <select id="filter-shop" name="shop_id">
+      <option value="">すべて</option>
       {% for s in shops %}<option value="{{ s.id }}" {% if filters.shop_id == s.id|string %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
     </select>
   </div>
   <div>
-    <select name="status_code">
-      <option value="">ステータス(すべて)</option>
+    <label for="filter-status">ステータス</label>
+    <select id="filter-status" name="status_code">
+      <option value="">すべて</option>
       {% for s in statuses %}<option value="{{ s.code }}" {% if filters.status_code == s.code %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
     </select>
   </div>
   <div>
-    <input type="text" name="tags" list="tag-list" placeholder="タグ(カンマ区切り)" value="{{ filters.tags }}">
+    <label for="filter-tags">タグ</label>
+    <input id="filter-tags" type="text" name="tags" list="tag-list" placeholder="カンマ区切り" value="{{ filters.tags }}">
     <datalist id="tag-list">{% for t in tag_names %}<option value="{{ t }}">{% endfor %}</datalist>
   </div>
   <div>
-    <input type="text" name="avatars" list="avatar-list" placeholder="対応アバター(カンマ区切り)" value="{{ filters.avatars }}">
+    <label for="filter-avatars">対応アバター</label>
+    <input id="filter-avatars" type="text" name="avatars" list="avatar-list" placeholder="カンマ区切り" value="{{ filters.avatars }}">
     <datalist id="avatar-list">{% for a in avatar_names %}<option value="{{ a }}">{% endfor %}</datalist>
   </div>
-  <label><input type="checkbox" name="favorites_only" value="true" {% if filters.favorites_only %}checked{% endif %}> お気に入りのみ</label>
-  <button type="submit">検索</button>
-  <span>
-    <button type="button" id="view-card-btn">カード</button>
-    <button type="button" id="view-table-btn">テーブル</button>
-  </span>
+  <div>
+    <label class="checkbox-label" for="filter-favorites">
+      <input id="filter-favorites" type="checkbox" name="favorites_only" value="true" {% if filters.favorites_only %}checked{% endif %}>
+      お気に入りのみ
+    </label>
+  </div>
+  <div>
+    <button type="submit" class="btn btn-primary"><span class="icon" aria-hidden="true">search</span>検索</button>
+  </div>
 </form>
 
-<div id="item-results">
+<div class="btn-group">
+  <div class="segmented" role="group" aria-label="表示形式">
+    <button type="button" class="btn" id="view-card-btn" aria-pressed="{{ 'true' if view != 'table' else 'false' }}">
+      <span class="icon" aria-hidden="true">grid_view</span>カード
+    </button>
+    <button type="button" class="btn" id="view-table-btn" aria-pressed="{{ 'true' if view == 'table' else 'false' }}">
+      <span class="icon" aria-hidden="true">table_rows</span>テーブル
+    </button>
+  </div>
+</div>
+
+<div id="item-results" aria-live="polite">
   {% if view == "table" %}
     {% include "items/_results_table.html" %}
   {% else %}
@@ -48,13 +67,17 @@
 (function () {
   var viewInput = document.getElementById("view-input");
   var form = document.getElementById("filter-form");
+  var cardBtn = document.getElementById("view-card-btn");
+  var tableBtn = document.getElementById("view-table-btn");
   function setView(view) {
     viewInput.value = view;
     localStorage.setItem("itemListView", view);
+    cardBtn.setAttribute("aria-pressed", String(view !== "table"));
+    tableBtn.setAttribute("aria-pressed", String(view === "table"));
     htmx.trigger(form, "submit");
   }
-  document.getElementById("view-card-btn").addEventListener("click", function () { setView("card"); });
-  document.getElementById("view-table-btn").addEventListener("click", function () { setView("table"); });
+  cardBtn.addEventListener("click", function () { setView("card"); });
+  tableBtn.addEventListener("click", function () { setView("table"); });
   var saved = localStorage.getItem("itemListView");
   if (saved && saved !== viewInput.value) {
     setView(saved);

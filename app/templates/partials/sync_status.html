@@ -1,1 +1,3 @@
-<p class="{% if is_dirty %}field-error{% else %}muted{% endif %}">{{ message }}</p>
+<div class="alert {% if is_dirty %}alert-error{% else %}alert-success{% endif %}" role="status">
+  <span class="icon" aria-hidden="true">{{ 'sync_problem' if is_dirty else 'check_circle' }}</span>{{ message }}
+</div>

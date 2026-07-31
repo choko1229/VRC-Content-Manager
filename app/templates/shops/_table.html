@@ -1,30 +1,33 @@
-{% if error %}<p class="field-error">{{ error }}</p>{% endif %}
+{% if error %}<div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ error }}</div>{% endif %}
 {% if shops %}
 <table>
+  <caption class="sr-only">登録済みショップ一覧</caption>
   <thead>
     <tr>
-      <th>ショップ名</th>
-      <th>URL</th>
-      <th>メモ</th>
-      <th>登録商品数</th>
-      <th></th>
+      <th scope="col">ショップ名</th>
+      <th scope="col">URL</th>
+      <th scope="col">メモ</th>
+      <th scope="col">登録商品数</th>
+      <th scope="col"><span class="sr-only">操作</span></th>
     </tr>
   </thead>
   <tbody>
     {% for shop in shops %}
     <tr>
       <td>{{ shop.name }}</td>
-      <td>{% if shop.url %}<a href="{{ shop.url }}" target="_blank" rel="noopener noreferrer">{{ shop.url }}</a>{% endif %}</td>
+      <td>{% if shop.url %}<a href="{{ shop.url }}" target="_blank" rel="noopener noreferrer">{{ shop.url }}<span class="sr-only">(新しいタブで開く)</span></a>{% endif %}</td>
       <td>{{ shop.memo or "" }}</td>
       <td>{{ shop.item_count }}</td>
       <td>
         <button
-          class="danger"
+          type="button"
+          class="btn btn-danger"
           hx-delete="/fragments/shops/{{ shop.id }}"
           hx-target="#shop-list"
           hx-swap="innerHTML"
           hx-confirm="「{{ shop.name }}」を削除しますか？"
-        >削除</button>
+          aria-label="「{{ shop.name }}」を削除"
+        ><span class="icon" aria-hidden="true">delete</span><span aria-hidden="true">削除</span></button>
       </td>
     </tr>
     {% endfor %}

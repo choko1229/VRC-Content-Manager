@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block title %}初回セットアップ - BOOTH Asset Manager{% endblock %}
 {% block content %}
-<h1>初回セットアップ</h1>
+<h1><span class="icon" aria-hidden="true">rocket_launch</span>初回セットアップ</h1>
 <p>このツールはファイルの実体をGoogle Driveに、メタデータをSQLite(実体もDrive上)に保存します。開始するにはGoogleアカウントでの認可が必要です。</p>
 <p class="muted">
   すでにDrive上にデータベースがある場合(ボリュームの再作成など)は、先に環境変数 <code>DRIVE_DB_FILE_ID</code> を設定してから認可してください。復元されます。未設定の場合は新規にデータベースが作成されます。
 </p>
-<p><a href="/oauth/google/start"><button type="button">Googleでログインして開始</button></a></p>
+<a href="/oauth/google/start" class="btn btn-primary"><span class="icon" aria-hidden="true">login</span>Googleでログインして開始</a>
 {% endblock %}
