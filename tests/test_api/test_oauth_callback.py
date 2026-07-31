@@ -48,6 +48,24 @@ def test_callback_rejects_mismatched_state(oauth_client: TestClient) -> None:
     assert response.status_code == 400
 
 
+def test_callback_surfaces_googles_own_error_instead_of_422(oauth_client: TestClient) -> None:
+    _obtain_state(oauth_client)
+
+    response = oauth_client.get(
+        "/oauth/google/callback",
+        params={"error": "access_denied", "error_description": "The user denied the request"},
+    )
+
+    assert response.status_code == 400
+    assert "access_denied" in response.json()["detail"]
+
+
+def test_callback_without_code_or_state_returns_clean_400(oauth_client: TestClient) -> None:
+    response = oauth_client.get("/oauth/google/callback")
+
+    assert response.status_code == 400
+
+
 def test_callback_returns_502_when_token_exchange_raises_unexpected_error(
     oauth_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

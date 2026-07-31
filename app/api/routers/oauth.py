@@ -36,7 +36,32 @@ def start(request: Request):
 
 
 @router.get("/callback")
-async def callback(request: Request, code: str, state: str, db: Session = Depends(get_db)):
+async def callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+    db: Session = Depends(get_db),
+):
+    # code/state aren't declared as required: when Google itself rejects the
+    # request (consent denied, the OAuth client isn't approved for this
+    # account yet, redirect_uri mismatch, etc.) it redirects back with
+    # `error` instead of `code`/`state`. Making them required meant FastAPI's
+    # own validation produced an opaque 422 with no indication of what
+    # actually went wrong on Google's side.
+    if error:
+        logger.warning("Google redirected back with an OAuth error: %s (%s)", error, error_description)
+        request.session.pop("oauth_state", None)
+        request.session.pop("oauth_code_verifier", None)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Google側で認可が拒否されました: {error}"
+            + (f" - {error_description}" if error_description else ""),
+        )
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Googleからの応答が不正です(codeまたはstateがありません)。")
+
     expected_state = request.session.pop("oauth_state", None)
     code_verifier = request.session.pop("oauth_code_verifier", None)
     if not expected_state or expected_state != state:
