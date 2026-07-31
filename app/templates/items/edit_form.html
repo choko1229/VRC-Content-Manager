@@ -9,6 +9,7 @@
 {% endif %}
 
 <form method="post" action="/items/{{ item_id }}/edit" class="item-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
   <fieldset>
     <legend>基本情報</legend>
     <label>商品名 *<br><input type="text" name="name" required maxlength="255" value="{{ form_values.get('name', '') }}"></label><br>

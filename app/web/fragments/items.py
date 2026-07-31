@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, Depends, Form, Request
 from sqlalchemy.orm import Session
 
+from app.core.csrf import verify_csrf
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.schemas.item import ItemSearchFilters
@@ -36,7 +37,7 @@ def search_items_fragment(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, template, {"items": items})
 
 
-@router.post("/{item_id}/update-check")
+@router.post("/{item_id}/update-check", dependencies=[Depends(verify_csrf)])
 def add_update_check_fragment(
     request: Request, item_id: int, note: str = Form(""), db: Session = Depends(get_db)
 ):

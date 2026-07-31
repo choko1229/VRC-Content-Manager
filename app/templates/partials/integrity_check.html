@@ -1,0 +1,14 @@
+{% if error %}
+<p class="field-error">{{ error }}</p>
+{% elif broken is not none %}
+  {% if broken %}
+  <p class="field-error">Driveで見つからないファイル参照が {{ broken | length }} 件あります:</p>
+  <ul>
+    {% for b in broken %}
+    <li>item_id={{ b.item_id }} ({{ b.file_role }}) {{ b.original_filename }} - drive_file_id={{ b.drive_file_id }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="success">問題は見つかりませんでした。</p>
+  {% endif %}
+{% endif %}

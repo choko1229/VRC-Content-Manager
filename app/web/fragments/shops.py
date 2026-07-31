@@ -6,13 +6,14 @@ from fastapi import APIRouter, Depends, Form, Request
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.core.csrf import verify_csrf
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.schemas.shop import ShopCreate
 from app.services import shop_service
 from app.web.templating import templates
 
-router = APIRouter(prefix="/fragments/shops")
+router = APIRouter(prefix="/fragments/shops", dependencies=[Depends(verify_csrf)])
 logger = logging.getLogger(__name__)
 
 

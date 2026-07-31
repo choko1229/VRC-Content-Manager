@@ -20,4 +20,11 @@
 <p class="muted">
   災害復旧用: このデータベースファイルIDを Pterodactyl の環境変数 <code>DRIVE_DB_FILE_ID</code> に設定しておくと、ボリュームを失った場合に復元できます。
 </p>
+
+{% if connected %}
+<h2>整合性チェック</h2>
+<p class="muted">登録済みファイルがDrive上で実際に見つかるかを確認します(取り込み失敗時の補償削除が失敗していた場合などに検出できます)。</p>
+<div id="integrity-check-result"></div>
+<button hx-post="/fragments/settings/integrity-check" hx-target="#integrity-check-result" hx-swap="innerHTML">チェック実行</button>
+{% endif %}
 {% endblock %}

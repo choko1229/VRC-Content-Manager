@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.config import get_settings
+from app.core.csrf import verify_csrf
 from app.core.exceptions import DriveError, NotFoundError
 from app.core.validation import DEFAULT_ALLOWED_EXTENSIONS, UploadValidationError
 from app.db.session import get_db
@@ -55,7 +56,7 @@ def new_item_page(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/items/new")
+@router.post("/items/new", dependencies=[Depends(verify_csrf)])
 async def create_item(
     request: Request,
     name: str = Form(...),
@@ -283,7 +284,7 @@ def edit_item_page(request: Request, item_id: int, db: Session = Depends(get_db)
     )
 
 
-@router.post("/items/{item_id}/edit")
+@router.post("/items/{item_id}/edit", dependencies=[Depends(verify_csrf)])
 def submit_edit_item(
     request: Request,
     item_id: int,

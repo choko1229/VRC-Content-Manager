@@ -3,9 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token(request) }}">
   <title>{% block title %}BOOTH Asset Manager{% endblock %}</title>
   <link rel="stylesheet" href="/static/css/style.css">
   <script src="/static/js/htmx.min.js"></script>
+  <script>
+    document.addEventListener("htmx:configRequest", function (evt) {
+      evt.detail.headers["X-CSRF-Token"] = document.querySelector('meta[name="csrf-token"]').content;
+    });
+  </script>
 </head>
 <body>
   <header class="app-header">
@@ -14,6 +20,12 @@
       <a href="/items/new">商品登録</a>
       <a href="/shops">ショップ</a>
       <a href="/settings">設定</a>
+      {% if request.session.authenticated %}
+      <form method="post" action="/logout" style="display: inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+        <button type="submit" style="border: none; background: none; padding: 0; font: inherit; cursor: pointer; text-decoration: underline;">ログアウト</button>
+      </form>
+      {% endif %}
     </nav>
   </header>
   <main class="app-main">
