@@ -9,6 +9,7 @@ single-user tool, not multi-tenant.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 
 from google.oauth2.credentials import Credentials
@@ -21,6 +22,15 @@ from app.core.exceptions import AppError
 from app.core.security import decrypt_token, encrypt_token
 from app.drive.google_drive_client import GoogleDriveClient
 from app.models.oauth_credential import OAuthCredential
+
+# Google sometimes returns a token response whose granted scope differs
+# slightly from what was requested (e.g. reordered, or an "openid" scope
+# tacked on by the account's session state) even though we only requested
+# drive.file. oauthlib's default behavior is to raise on any such mismatch,
+# which is a well-known false-positive with google-auth-oauthlib. Must be
+# set before Flow.fetch_token() is ever called; setting it at import time
+# here covers every call site.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 logger = logging.getLogger(__name__)
 

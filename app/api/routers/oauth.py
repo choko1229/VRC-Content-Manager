@@ -46,6 +46,17 @@ async def callback(request: Request, code: str, state: str, db: Session = Depend
         )
     except AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        # Anything below our own AppError hierarchy here is almost always the
+        # token exchange itself failing (redirect URI mismatch, network
+        # issue, an oauthlib scope-mismatch quirk, etc.) -- log the full
+        # traceback for diagnosis and give the user an actionable message
+        # instead of the generic catch-all 500.
+        logger.error("Google token exchange failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=502,
+            detail="Googleとのトークン交換に失敗しました。サーバーログを確認してください。",
+        ) from exc
 
     if drive_sync_service.needs_setup():
         drive_db_file_id = request.session.pop("setup_drive_db_file_id", None)
