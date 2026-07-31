@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000">
+  <defs>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="90"/>
+    </filter>
+  </defs>
+  <rect width="1600" height="1000" fill="#eef2f8"/>
+  <g filter="url(#soft)">
+    <circle cx="260" cy="150" r="260" fill="#bfdbfe" opacity="0.55"/>
+    <circle cx="1300" cy="220" r="300" fill="#ddd6fe" opacity="0.5"/>
+    <circle cx="1150" cy="820" r="340" fill="#fbcfe8" opacity="0.45"/>
+    <circle cx="220" cy="820" r="240" fill="#bbf7d0" opacity="0.4"/>
+  </g>
+</svg>

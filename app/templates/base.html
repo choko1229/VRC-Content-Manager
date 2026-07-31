@@ -27,15 +27,17 @@
       },
     };
   </script>
-  <link rel="stylesheet" href="/static/css/style.css">
-  <script src="/static/js/htmx.min.js"></script>
+  <link rel="stylesheet" href="/static/css/style.css?v={{ asset_version }}">
+  <script src="/static/js/htmx.min.js?v={{ asset_version }}"></script>
   <script>
     document.addEventListener("htmx:configRequest", function (evt) {
       evt.detail.headers["X-CSRF-Token"] = document.querySelector('meta[name="csrf-token"]').content;
     });
   </script>
 </head>
-<body class="min-h-screen font-sans text-slate-900 dark:text-slate-100 bg-gradient-to-br from-sky-100 via-indigo-50 to-fuchsia-100 dark:from-slate-950 dark:via-indigo-950 dark:to-slate-900 bg-fixed">
+<body class="min-h-screen font-sans text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-950">
+  <div class="fixed inset-0 -z-20 bg-[url('/static/img/bg-light.svg')] dark:bg-[url('/static/img/bg-dark.svg')] bg-cover bg-center bg-fixed" aria-hidden="true"></div>
+  <div class="fixed inset-0 -z-10 bg-white/75 dark:bg-slate-950/75" aria-hidden="true"></div>
   <a href="#main-content" class="skip-link">メインコンテンツへスキップ</a>
 
   <header class="sticky top-0 z-30 backdrop-blur-xl bg-white/60 dark:bg-slate-950/50 border-b border-white/50 dark:border-white/10 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
