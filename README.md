@@ -55,7 +55,8 @@ docker run --rm -p 8000:8000 --env-file .env -v $(pwd)/data:/data booth-asset-ma
 
 ## Pterodactyl
 
-- Eggは「Dockerイメージを起動して指定ポートをリッスンするだけ」の単純なコンテナ実行になるので、DockerイメージをビルドしてEggのDocker Imageに指定するか、汎用のDockerコンテナEggを使う。
+推奨は「Dockerイメージを起動するだけ」のEgg(このリポジトリのDockerfileを指定、または汎用Docker Image Egg)。
+
 - Egg設定で `DATA_DIR`(既定 `/data`)を永続ボリュームにマッピングすること。
 - 環境変数は `.env.example` を参照し、Eggの変数(Variables)として設定する。特に以下は必須:
   - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `GOOGLE_OAUTH_REDIRECT_URI`(公開URLに合わせて設定し、Google Cloud Console側のリダイレクトURIにも追加する)
@@ -63,6 +64,18 @@ docker run --rm -p 8000:8000 --env-file .env -v $(pwd)/data:/data booth-asset-ma
 - `DRIVE_DB_FILE_ID` はディザスタリカバリ用(ボリュームを失った場合に指定するとDriveからDBを復元する)。`/settings` 画面に表示されるIDを控えておくと良い。
 - インターネットに公開する場合は `APP_LOGIN_PASSWORD` を必ず設定すること(下記参照)。
 - `PORT` はEggがコンテナに割り当てるポートに合わせる。
+
+### 「Generic Python」系Egg(parkervcp/yolks:python_3.13など)を使う場合
+
+Dockerfileを使わず、リポジトリをgit cloneして `pip install -r requirements.txt` → `python main.py` を実行するタイプのEggでも動くように、リポジトリ直下に `requirements.txt`(`uv export`で生成)と `main.py`(uvicornを単一ワーカーで起動するだけの薄いエントリポイント)を用意してある。Eggの変数で以下を設定する:
+
+- `PY_FILE` = `main.py`
+- `REQUIREMENTS_FILE` = `requirements.txt`
+- Egg側の起動コマンドが `pip install --prefix .local` を使う場合、それが自動でパスに反映されない構成もあるので起動ログでimportエラーが出ないか確認すること。
+- ポートはEggが `SERVER_PORT` として渡す想定(`main.py` はそれを最優先で読む。無ければ `PORT`、それも無ければ8000)。
+- `requirements.txt` は `uv.lock` から生成しているため、依存関係を更新したら `uv export --no-hashes --no-dev --no-emit-project -o requirements.txt` で再生成すること。
+
+このEggでは `uv` や単一ワーカーの強制がDockerfileほど厳密に保証されないため、可能であればDockerベースのEgg運用を推奨する。
 
 ## セキュリティ
 
