@@ -48,7 +48,10 @@ async def callback(request: Request, code: str, state: str, db: Session = Depend
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if drive_sync_service.needs_setup():
-        await run_in_threadpool(drive_sync_service.complete_first_run_setup, credentials)
+        drive_db_file_id = request.session.pop("setup_drive_db_file_id", None)
+        await run_in_threadpool(
+            drive_sync_service.complete_first_run_setup, credentials, drive_db_file_id=drive_db_file_id
+        )
         logger.info("first-run Drive setup completed via OAuth callback")
         return RedirectResponse(url="/")
 

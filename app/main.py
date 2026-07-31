@@ -13,7 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.routers import downloads as downloads_router
 from app.api.routers import oauth as oauth_router
-from app.config import get_settings
+from app.config import get_instance_config, get_settings
 from app.core.error_handlers import register_exception_handlers
 from app.db.migrate import run_migrations
 from app.db.session import get_sessionmaker
@@ -102,13 +102,13 @@ def create_app() -> FastAPI:
                 return await call_next(request)
             return RedirectResponse(url="/setup")
 
-        current_settings = get_settings()
-        if current_settings.app_login_password and path != "/login" and not request.session.get("authenticated"):
+        login_password = get_instance_config().app_login_password
+        if login_password and path != "/login" and not request.session.get("authenticated"):
             return RedirectResponse(url=f"/login?next={path}")
 
         return await call_next(request)
 
-    app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
+    app.add_middleware(SessionMiddleware, secret_key=get_instance_config().session_secret_key)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

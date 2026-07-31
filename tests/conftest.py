@@ -4,7 +4,6 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from cryptography.fernet import Fernet
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -39,8 +38,6 @@ def configured_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     the `migrated_settings` fixture when a ready-to-use DB is needed.
     """
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    monkeypatch.setenv("DRIVE_DB_FILE_ID", "")
     get_settings.cache_clear()
     reset_engine_for_tests()
     yield get_settings()

@@ -1,10 +1,16 @@
 """Application configuration.
 
-Secrets and deployment-environment values come from `.env` / real environment
-variables via pydantic-settings. Anything that is more "operational setting"
-than "secret" (upload extension allowlist overrides, default status, etc.)
-belongs in the DB-backed `app_settings` table instead, per the project's
-config policy — see app/services/settings_service.py (added in a later phase).
+`.env` is intentionally minimal: only values needed before the app can even
+locate its own data or bind a port belong here. Everything else that might
+look like ".env material" at first glance lives elsewhere on purpose:
+  - Google OAuth client credentials, the token-encryption/session-signing
+    keys, and the optional login password -> app/core/instance_config.py
+    (a local JSON file, populated via /setup, never synced to Drive).
+  - Upload size limit, Drive sync interval -> the DB-backed `app_settings`
+    table (app/services/app_settings_service.py), editable from /settings
+    once the database exists.
+`LOG_LEVEL` is the one debugging-only exception kept as an optional env var:
+logging must be configured before any DB read is possible.
 """
 
 from __future__ import annotations
@@ -15,6 +21,9 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.instance_config import InstanceConfig
+from app.core.instance_config import load as load_instance_config
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -23,25 +32,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # --- Google OAuth ---
-    google_oauth_client_id: str = ""
-    google_oauth_client_secret: str = ""
-    google_oauth_redirect_uri: str = "http://localhost:8000/oauth/google/callback"
-
-    # --- Secrets ---
-    token_encryption_key: str = ""
-    session_secret_key: str = "dev-insecure-session-secret-change-me"
-    app_login_password: str = ""
-
-    # --- Disaster recovery ---
-    drive_db_file_id: str = ""
-
-    # --- Runtime ---
     data_dir: Path = Field(default=Path("./data"))
     port: int = 8000
     log_level: str = "INFO"
-    max_upload_size_mb: int = 500
-    sync_interval_seconds: int = 60
 
     @property
     def local_db_path(self) -> Path:
@@ -59,3 +52,9 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def get_instance_config() -> InstanceConfig:
+    """Not cached: this is a small local JSON file re-read on each call so that
+    edits made via /setup or /settings take effect immediately without a restart."""
+    return load_instance_config(get_settings().data_dir)

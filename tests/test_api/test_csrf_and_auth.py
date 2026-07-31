@@ -58,11 +58,14 @@ def test_shop_create_with_wrong_csrf_token_is_rejected(client: TestClient) -> No
 
 
 @pytest.fixture()
-def client_with_login(app_db_session: Session, monkeypatch: pytest.MonkeyPatch):
-    from app.config import get_settings
+def client_with_login(app_db_session: Session):
+    from app.config import get_instance_config, get_settings
+    from app.core.instance_config import save as save_instance_config
 
-    monkeypatch.setenv("APP_LOGIN_PASSWORD", "correct-horse-battery-staple")
-    get_settings.cache_clear()
+    settings = get_settings()
+    config = get_instance_config()
+    config.app_login_password = "correct-horse-battery-staple"
+    save_instance_config(settings.data_dir, config)
 
     def override_get_db():
         yield app_db_session
@@ -73,7 +76,6 @@ def client_with_login(app_db_session: Session, monkeypatch: pytest.MonkeyPatch):
             yield test_client
     finally:
         app.dependency_overrides.pop(get_db, None)
-        get_settings.cache_clear()
 
 
 def test_protected_page_redirects_to_login_when_password_configured(client_with_login: TestClient) -> None:

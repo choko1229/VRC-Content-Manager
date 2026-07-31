@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import re
 import uuid
-from functools import lru_cache
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from app.config import get_settings
+from app.config import get_instance_config
 from app.core.exceptions import AppError
 
 _UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9 ._\-()\[\]ぁ-んァ-ヶ一-龠ー]+")
@@ -24,19 +23,15 @@ class TokenEncryptionError(AppError):
     pass
 
 
-@lru_cache
 def _fernet() -> Fernet:
-    key = get_settings().token_encryption_key
-    if not key:
-        raise TokenEncryptionError(
-            "TOKEN_ENCRYPTION_KEY is not set; cannot encrypt/decrypt the Drive OAuth token. "
-            "Generate one with: python -c \"from cryptography.fernet import Fernet; "
-            'print(Fernet.generate_key().decode())"'
-        )
+    # Not cached: the key is stable for the life of instance_config.json, but
+    # avoiding a cache means tests/tools that swap DATA_DIR mid-process never
+    # see a stale key from a previous instance.
+    key = get_instance_config().token_encryption_key
     try:
         return Fernet(key.encode())
     except (ValueError, TypeError) as exc:
-        raise TokenEncryptionError("TOKEN_ENCRYPTION_KEY is not a valid Fernet key") from exc
+        raise TokenEncryptionError("stored token_encryption_key is not a valid Fernet key") from exc
 
 
 def encrypt_token(plaintext: str) -> str:

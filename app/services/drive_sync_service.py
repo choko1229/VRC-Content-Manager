@@ -2,13 +2,14 @@
 
 - Bootstrap (see `complete_first_run_setup`): first run has no local DB. The
   app defers DB creation until OAuth completes (token can't be persisted
-  before a DB exists), then either downloads an existing snapshot
-  (DRIVE_DB_FILE_ID set -- disaster recovery) or creates+migrates a fresh
-  DB and uploads it (true first run).
+  before a DB exists), then either downloads an existing snapshot (if a
+  Drive DB file id was given on /setup -- disaster recovery) or creates
+  +migrates a fresh DB and uploads it (true first run).
 - Write-back: services call `mark_dirty()` after a successful local commit.
-  A background loop (`sync_loop`) flushes on a timer (SYNC_INTERVAL_SECONDS)
-  rather than per-write, to avoid thrashing the Drive API quota. Also
-  flushed once on graceful shutdown and via a manual "sync now" action.
+  A background loop (`sync_loop`) flushes on a timer (DB-backed
+  `sync_interval_seconds`, see app_config_service) rather than per-write, to
+  avoid thrashing the Drive API quota. Also flushed once on graceful
+  shutdown and via a manual "sync now" action.
 - Snapshotting: the live SQLite file is never uploaded directly. `VACUUM
   INTO` takes a consistent point-in-time copy first, so a page mid-write is
   never uploaded. Requires `--workers 1` (single writer) by design.
@@ -36,7 +37,7 @@ from app.db.session import get_sessionmaker
 from app.drive import folder_layout
 from app.drive.client import DriveClient
 from app.drive.google_drive_client import GoogleDriveClient
-from app.services import app_settings_service, oauth_service
+from app.services import app_config_service, app_settings_service, oauth_service
 
 logger = logging.getLogger(__name__)
 
@@ -73,23 +74,29 @@ def snapshot_db_to(dest_path: Path) -> None:
         conn.execute(f"VACUUM INTO '{escaped}'")
 
 
-def complete_first_run_setup(credentials: Credentials, *, drive_client: DriveClient | None = None) -> None:
+def complete_first_run_setup(
+    credentials: Credentials,
+    *,
+    drive_db_file_id: str | None = None,
+    drive_client: DriveClient | None = None,
+) -> None:
     """Called once, right after the OAuth callback succeeds on a machine with no local DB yet.
 
-    `drive_client` is injectable so tests can pass a FakeDriveClient instead of hitting real
-    Google Drive; production callers (app/api/routers/oauth.py) always omit it.
+    `drive_db_file_id` comes from the /setup form (disaster recovery: restore an existing
+    Drive-hosted database instead of creating a fresh one). `drive_client` is injectable so
+    tests can pass a FakeDriveClient instead of hitting real Google Drive; production callers
+    (app/api/routers/oauth.py) always omit it.
     """
     settings = get_settings()
     settings.local_db_path.parent.mkdir(parents=True, exist_ok=True)
     drive_client = drive_client if drive_client is not None else GoogleDriveClient(credentials)
 
-    if settings.drive_db_file_id:
-        logger.info("DRIVE_DB_FILE_ID set; restoring existing database from Drive")
-        drive_client.download_file(file_id=settings.drive_db_file_id, dest_path=settings.local_db_path)
+    if drive_db_file_id:
+        logger.info("restoring existing database from Drive (drive_db_file_id=%s)", drive_db_file_id)
+        drive_client.download_file(file_id=drive_db_file_id, dest_path=settings.local_db_path)
         run_migrations()  # idempotent; catches up if the snapshot predates a newer schema
-        drive_db_file_id = settings.drive_db_file_id
     else:
-        logger.info("no DRIVE_DB_FILE_ID; creating a fresh database and uploading it to Drive")
+        logger.info("no existing Drive database specified; creating a fresh database and uploading it")
         run_migrations()
         db_folder_id = folder_layout.ensure_db_folder(drive_client)
         tmp_snapshot = settings.data_dir / "tmp" / f"initial_snapshot_{uuid.uuid4().hex}.db"
@@ -207,9 +214,21 @@ async def flush_now_async() -> bool:
     return await asyncio.to_thread(_flush_blocking)
 
 
+def _get_sync_interval_seconds() -> int:
+    if needs_setup():
+        # No DB yet (first run, still on /setup) -- nothing to sync, and the
+        # app_settings table doesn't exist to query yet either.
+        return app_config_service.DEFAULT_SYNC_INTERVAL_SECONDS
+    session_local = get_sessionmaker()
+    with session_local() as db:
+        return app_config_service.get_sync_interval_seconds(db)
+
+
 async def sync_loop(stop_event: asyncio.Event) -> None:
-    interval = get_settings().sync_interval_seconds
     while not stop_event.is_set():
+        # Re-read each cycle (not just once) so a change made on /settings
+        # takes effect on the next tick without requiring a restart.
+        interval = await asyncio.to_thread(_get_sync_interval_seconds)
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval)
         except asyncio.TimeoutError:

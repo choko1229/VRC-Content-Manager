@@ -25,16 +25,19 @@ uv run uvicorn app.main:app --reload
 
 `http://localhost:8000/healthz` が `{"status": "ok"}` を返せば起動確認OK。
 
-ローカルにデータベースファイル(`data/app.db`)が存在しない状態でアクセスすると `/setup` にリダイレクトされ、Google Driveへの接続を求められる(下記「Google OAuth設定」参照)。開発中にDrive接続なしでUIだけ触りたい場合は、先に `uv run alembic upgrade head` を実行してローカルDBだけ作成しておくと `/setup` を経由せずに動作する(Driveには未接続の状態として動く。取り込み・ダウンロード・サムネイル表示など実際にDriveへアクセスする機能は「Google Driveが未接続です」というエラーになる)。
+ローカルにデータベースファイル(`data/app.db`)が存在しない状態でアクセスすると `/setup` にリダイレクトされ、Google OAuthクライアントの登録とDrive接続を求められる(下記「Google OAuth設定」参照)。開発中にDrive接続なしでUIだけ触りたい場合は、先に `uv run alembic upgrade head` を実行してローカルDBだけ作成しておくと `/setup` を経由せずに動作する(Driveには未接続の状態として動く。取り込み・ダウンロード・サムネイル表示など実際にDriveへアクセスする機能は「Google Driveが未接続です」というエラーになる)。
 
 ## Google OAuth設定
 
+`.env` にはOAuthクライアント情報を書かない。すべて `/setup`(初回)・`/settings`(以降の変更)からアプリ内で設定する。
+
 1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成し、「Google Drive API」を有効化する。
-2. 「APIとサービス」→「認証情報」で OAuth クライアントID(種類: ウェブアプリケーション)を作成する。
-   - 承認済みのリダイレクトURI に `http://localhost:8000/oauth/google/callback` (本番では実際のURL)を追加する。
-3. 発行された クライアントID/シークレット を `.env` の `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` に設定する。
-4. `TOKEN_ENCRYPTION_KEY` と `SESSION_SECRET_KEY` を生成して設定する(`.env.example` にコマンド例あり)。
-5. アプリにアクセスすると `/setup` が表示されるので、Googleでログインして認可する。初回はDriveに新規データベースが作成される。ボリューム消失後の復旧など、既存のDriveデータベースを使う場合は先に `DRIVE_DB_FILE_ID` を設定してから認可する。
+2. 「APIとサービス」→「認証情報」で OAuth クライアントID(種類: ウェブアプリケーション)を作成する。このとき「承認済みのリダイレクトURI」は一旦空でよい(次のステップで確定する)。
+3. アプリにアクセスすると `/setup` が表示されるので、Client ID・Client Secret・リダイレクトURI(既定でこの画面のURLから自動入力される)を入力する。表示されたリダイレクトURIをGoogle Cloud Console側の「承認済みのリダイレクトURI」に追加してから保存する。
+4. 保存すると自動的にGoogleの認可画面に進む。初回はDriveに新規データベースが作成される。ボリューム消失後の復旧など、既存のDriveデータベースを使う場合は同じ画面の「既存のDriveデータベースファイルID」にIDを入力してから認可する。
+5. Client ID/Secretやログインパスワードは後から `/settings` でいつでも変更できる。
+
+OAuthクライアント情報・ログインパスワード・トークン暗号化キー・セッション署名キーは `${DATA_DIR}/instance_config.json` に保存され、Driveには同期されない(Driveのバックアップが漏れてもこれらは含まれない)。
 
 ## テスト
 
@@ -57,13 +60,10 @@ docker run --rm -p 8000:8000 --env-file .env -v $(pwd)/data:/data booth-asset-ma
 
 推奨は「Dockerイメージを起動するだけ」のEgg(このリポジトリのDockerfileを指定、または汎用Docker Image Egg)。
 
-- Egg設定で `DATA_DIR`(既定 `/data`)を永続ボリュームにマッピングすること。
-- 環境変数は `.env.example` を参照し、Eggの変数(Variables)として設定する。特に以下は必須:
-  - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `GOOGLE_OAUTH_REDIRECT_URI`(公開URLに合わせて設定し、Google Cloud Console側のリダイレクトURIにも追加する)
-  - `TOKEN_ENCRYPTION_KEY` / `SESSION_SECRET_KEY`
-- `DRIVE_DB_FILE_ID` はディザスタリカバリ用(ボリュームを失った場合に指定するとDriveからDBを復元する)。`/settings` 画面に表示されるIDを控えておくと良い。
-- インターネットに公開する場合は `APP_LOGIN_PASSWORD` を必ず設定すること(下記参照)。
-- `PORT` はEggがコンテナに割り当てるポートに合わせる。
+- Egg設定で `DATA_DIR`(既定 `/data`)を永続ボリュームにマッピングすること。`instance_config.json` もこの中に保存されるので、ボリュームが消えない限りOAuthクライアント情報やログインパスワードは再設定不要。
+- 環境変数は `.env.example` の3つ(`DATA_DIR` / `PORT` / `LOG_LEVEL`)のみ。Google OAuthクライアント・ログインパスワード・アップロード上限・Drive同期間隔はデプロイ後にブラウザから `/setup`・`/settings` で設定する。
+- ボリュームを失って作り直した場合は、控えておいたDriveデータベースファイルID(`/settings` に表示される)を新しい `/setup` 画面で入力すれば復元できる。
+- インターネットに公開する場合は `/setup` または `/settings` でログインパスワードを設定すること(下記参照)。
 
 ### 「Generic Python」系Egg(parkervcp/yolks:python_3.13など)を使う場合
 
@@ -79,15 +79,19 @@ Dockerfileを使わず、リポジトリをgit cloneして `pip install -r requi
 
 ## セキュリティ
 
-- **OAuthトークン**: SQLite内に `TOKEN_ENCRYPTION_KEY`(Fernet)で暗号化して保存する。ログには一切出力しない(`app/logging_conf.py` のredactionフィルタでも二重に保護)。最終的なセキュリティはホスト・Googleアカウント自体の保護に依存する、個人ツールとしての現実的な妥協点。
+- **OAuthトークン**: SQLite内に `instance_config.json` 内の鍵(Fernet、初回起動時に自動生成)で暗号化して保存する。ログには一切出力しない(`app/logging_conf.py` のredactionフィルタでも二重に保護)。最終的なセキュリティはホスト・Googleアカウント自体の保護に依存する、個人ツールとしての現実的な妥協点。
+- **`instance_config.json`**: Google OAuthクライアント情報・ログインパスワード・トークン暗号化鍵・セッション署名鍵をローカルの `${DATA_DIR}/instance_config.json` に保存する。この設計はDrive同期対象のSQLiteとは意図的に分離している — Drive上のDBバックアップが漏れても、これらの値は含まれない。
 - **アップロード検証**: 拡張子allowlist・サイズ上限・マジックバイト検証を行う。zipの中身は一切展開・列挙しない(zip爆弾・パストラバーサル対策)。
 - **CSRF対策**: セッションに紐づくトークンを発行し、HTMXリクエストは `X-CSRF-Token` ヘッダー、通常フォーム送信は隠しフィールドで検証する(状態変更を伴う全POST/DELETEに適用)。
-- **ログインゲート**: `APP_LOGIN_PASSWORD` を設定すると、初回セットアップ(`/setup`・`/oauth/*`)以外の全ルートがパスワード保護される。個人利用でPterodactyl等インターネットに公開する場合は設定を強く推奨。
+- **ログインゲート**: `/setup` または `/settings` でログインパスワードを設定すると、初回セットアップ(`/setup`・`/oauth/*`)以外の全ルートがパスワード保護される。個人利用でPterodactyl等インターネットに公開する場合は設定を強く推奨。パスワードを新規設定/変更した直後は、設定した本人のセッションも含めて再ログインが必要になる。
 - **整合性チェック**: `/settings` 画面から、DB上のファイル参照が実際にDrive上に存在するかを確認できる(取り込み失敗時の補償削除がさらに失敗した場合などを検出する保険)。
-- `.env` は絶対にコミットしないこと(`.gitignore`済み)。
+- `.env` / `instance_config.json` は絶対にコミットしないこと(`.gitignore`済み)。
 
 ## アーキテクチャ
 
+- `app/config.py` - `.env`(DATA_DIR/PORT/LOG_LEVEL)のみを扱う
+- `app/core/instance_config.py` - ローカル専用の設定(OAuthクライアント情報・鍵・ログインパスワード)。`/setup`・`/settings` から読み書きする
+- `app/services/app_config_service.py` - DB同期される運用設定(アップロード上限・Drive同期間隔)
 - `app/models/` - SQLAlchemy 2.0モデル
 - `app/schemas/` - Pydantic DTO
 - `app/services/` - ビジネスロジック(DB・Driveへのアクセスはここに集約)

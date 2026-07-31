@@ -7,25 +7,23 @@ from app.core.security import TokenEncryptionError, sanitize_filename
 
 
 def test_encrypt_decrypt_round_trip(configured_settings) -> None:
-    security._fernet.cache_clear()
-
     ciphertext = security.encrypt_token("super-secret-refresh-token")
 
     assert ciphertext != "super-secret-refresh-token"
     assert security.decrypt_token(ciphertext) == "super-secret-refresh-token"
 
 
-def test_decrypt_with_wrong_key_raises(configured_settings, monkeypatch: pytest.MonkeyPatch) -> None:
-    security._fernet.cache_clear()
-    ciphertext = security.encrypt_token("secret")
-
+def test_decrypt_with_wrong_key_raises(configured_settings) -> None:
     from cryptography.fernet import Fernet
 
-    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    from app.config import get_settings
+    from app.config import get_instance_config
+    from app.core.instance_config import save as save_instance_config
 
-    get_settings.cache_clear()
-    security._fernet.cache_clear()
+    ciphertext = security.encrypt_token("secret")
+
+    config = get_instance_config()
+    config.token_encryption_key = Fernet.generate_key().decode()
+    save_instance_config(configured_settings.data_dir, config)
 
     with pytest.raises(TokenEncryptionError):
         security.decrypt_token(ciphertext)

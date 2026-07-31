@@ -16,7 +16,7 @@ from google_auth_oauthlib.flow import Flow
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
+from app.config import get_instance_config
 from app.core.exceptions import AppError
 from app.core.security import decrypt_token, encrypt_token
 from app.drive.google_drive_client import GoogleDriveClient
@@ -36,17 +36,21 @@ class NotConnectedError(AppError):
     pass
 
 
+def is_configured() -> bool:
+    return get_instance_config().oauth_configured
+
+
 def _client_config() -> dict:
-    settings = get_settings()
-    if not settings.google_oauth_client_id or not settings.google_oauth_client_secret:
+    config = get_instance_config()
+    if not config.oauth_configured:
         raise OAuthNotConfiguredError(
-            "GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET are not set in .env"
+            "Google OAuthクライアントが未設定です。/setup からClient ID/Secretを登録してください。"
         )
     return {
         "web": {
-            "client_id": settings.google_oauth_client_id,
-            "client_secret": settings.google_oauth_client_secret,
-            "redirect_uris": [settings.google_oauth_redirect_uri],
+            "client_id": config.google_oauth_client_id,
+            "client_secret": config.google_oauth_client_secret,
+            "redirect_uris": [config.google_oauth_redirect_uri],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
         }
@@ -54,12 +58,12 @@ def _client_config() -> dict:
 
 
 def _build_flow(state: str | None = None) -> Flow:
-    settings = get_settings()
+    config = get_instance_config()
     return Flow.from_client_config(
         _client_config(),
         scopes=SCOPES,
         state=state,
-        redirect_uri=settings.google_oauth_redirect_uri,
+        redirect_uri=config.google_oauth_redirect_uri,
     )
 
 
@@ -129,13 +133,13 @@ def load_credentials(db: Session) -> Credentials | None:
     row = db.execute(select(OAuthCredential).where(OAuthCredential.provider == PROVIDER)).scalar_one_or_none()
     if row is None:
         return None
-    settings = get_settings()
+    config = get_instance_config()
     return Credentials(
         token=decrypt_token(row.access_token_encrypted),
         refresh_token=decrypt_token(row.refresh_token_encrypted),
         token_uri="https://oauth2.googleapis.com/token",
-        client_id=settings.google_oauth_client_id,
-        client_secret=settings.google_oauth_client_secret,
+        client_id=config.google_oauth_client_id,
+        client_secret=config.google_oauth_client_secret,
         scopes=row.scope.split() if row.scope else SCOPES,
         expiry=_naive_utc(row.token_expiry),
     )

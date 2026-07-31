@@ -27,7 +27,7 @@
 {% endif %}
 
 <p class="muted">
-  災害復旧用: このデータベースファイルIDを Pterodactyl の環境変数 <code>DRIVE_DB_FILE_ID</code> に設定しておくと、ボリュームを失った場合に復元できます。
+  災害復旧用: このデータベースファイルIDを控えておくと、ボリュームを失った場合に <a href="/setup">初回セットアップ画面</a> で入力して復元できます。
 </p>
 
 {% if connected %}
@@ -38,4 +38,55 @@
   <span class="icon" aria-hidden="true">fact_check</span>チェック実行
 </button>
 {% endif %}
+
+<h2>Google OAuthクライアント</h2>
+{% if oauth_error %}
+<div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ oauth_error }}</div>
+{% endif %}
+<form method="post" action="/settings/oauth-credentials" class="item-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  <fieldset>
+    <legend>Client ID / Secret / リダイレクトURI</legend>
+    <label for="set-client-id">Client ID<span class="required-badge">必須</span></label>
+    <input id="set-client-id" type="text" name="google_oauth_client_id" required value="{{ google_oauth_client_id }}">
+
+    <label for="set-client-secret">Client Secret<br><span class="muted">変更する場合のみ入力してください。</span></label>
+    <input id="set-client-secret" type="password" name="google_oauth_client_secret" autocomplete="off">
+
+    <label for="set-redirect-uri">リダイレクトURI<span class="required-badge">必須</span></label>
+    <input id="set-redirect-uri" type="url" name="google_oauth_redirect_uri" required value="{{ google_oauth_redirect_uri }}">
+  </fieldset>
+  <button type="submit" class="btn btn-secondary"><span class="icon" aria-hidden="true">save</span>保存</button>
+</form>
+
+<h2>ログインパスワード</h2>
+{% if password_error %}
+<div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ password_error }}</div>
+{% endif %}
+<p class="muted">現在の状態: {% if app_login_password_set %}設定済み{% else %}未設定{% endif %}</p>
+<form method="post" action="/settings/login-password" class="item-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  <div>
+    <label for="set-login-password">新しいパスワード<br><span class="muted">空欄で保存するとパスワード保護を解除します。</span></label>
+    <input id="set-login-password" type="password" name="app_login_password" autocomplete="new-password">
+  </div>
+  <button type="submit" class="btn btn-secondary"><span class="icon" aria-hidden="true">save</span>保存</button>
+</form>
+
+<h2>動作設定</h2>
+{% if operational_error %}
+<div class="alert alert-error" role="alert"><span class="icon" aria-hidden="true">error</span>{{ operational_error }}</div>
+{% endif %}
+<form method="post" action="/settings/operational" class="item-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  <fieldset>
+    <legend>アップロード・同期</legend>
+    <label for="set-max-upload">アップロード上限(MB)</label>
+    <input id="set-max-upload" type="number" name="max_upload_size_mb" min="1" value="{{ max_upload_size_mb }}">
+
+    <label for="set-sync-interval">Drive自動同期間隔(秒)</label>
+    <input id="set-sync-interval" type="number" name="sync_interval_seconds" min="1" value="{{ sync_interval_seconds }}">
+  </fieldset>
+  <button type="submit" class="btn btn-secondary"><span class="icon" aria-hidden="true">save</span>保存</button>
+</form>
 {% endblock %}

@@ -6,7 +6,7 @@ import secrets
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
-from app.config import get_settings
+from app.config import get_instance_config
 from app.core.csrf import verify_csrf
 from app.web.templating import templates
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 @router.get("/login")
 def login_page(request: Request):
-    if not get_settings().app_login_password:
+    if not get_instance_config().app_login_password:
         return RedirectResponse(url="/")
     return templates.TemplateResponse(
         request,
@@ -27,8 +27,7 @@ def login_page(request: Request):
 
 @router.post("/login", dependencies=[Depends(verify_csrf)])
 def login_submit(request: Request, password: str = Form(...)):
-    settings = get_settings()
-    expected = settings.app_login_password
+    expected = get_instance_config().app_login_password
     next_url = request.query_params.get("next") or "/"
 
     if expected and secrets.compare_digest(password, expected):

@@ -7,7 +7,6 @@ import pytest
 from google.oauth2.credentials import Credentials
 from sqlalchemy.orm import Session
 
-from app.core import security
 from app.db.session import get_sessionmaker
 from app.drive.fake_drive_client import FakeDriveClient
 from app.services import app_settings_service, drive_sync_service, oauth_service
@@ -82,7 +81,6 @@ def test_flush_now_skips_when_drive_db_file_id_missing(app_db_session: Session) 
 
 
 def test_complete_first_run_setup_creates_fresh_database(configured_settings) -> None:
-    security._fernet.cache_clear()
     assert drive_sync_service.needs_setup() is True
     fake_client = FakeDriveClient()
 
@@ -97,14 +95,10 @@ def test_complete_first_run_setup_creates_fresh_database(configured_settings) ->
         assert fake_client.get_metadata(file_id).name == "app.db"
 
 
-def test_complete_first_run_setup_restores_existing_database(
-    configured_settings, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.config import get_settings
+def test_complete_first_run_setup_restores_existing_database(configured_settings) -> None:
     from app.db.migrate import run_migrations
     from app.db.session import reset_engine_for_tests
 
-    security._fernet.cache_clear()
     configured_settings.data_dir.mkdir(parents=True, exist_ok=True)
     run_migrations()  # simulate a prior install that already has a DB
 
@@ -120,13 +114,12 @@ def test_complete_first_run_setup_restores_existing_database(
 
     configured_settings.local_db_path.unlink()  # simulate volume loss
     reset_engine_for_tests()
-    monkeypatch.setenv("DRIVE_DB_FILE_ID", uploaded.id)
-    get_settings.cache_clear()
-    restored_settings = get_settings()
 
-    drive_sync_service.complete_first_run_setup(_fake_credentials(), drive_client=fake_client)
+    drive_sync_service.complete_first_run_setup(
+        _fake_credentials(), drive_db_file_id=uploaded.id, drive_client=fake_client
+    )
 
-    assert restored_settings.local_db_path.exists()
+    assert configured_settings.local_db_path.exists()
     session_local = get_sessionmaker()
     with session_local() as db:
         assert oauth_service.is_connected(db)
@@ -135,7 +128,6 @@ def test_complete_first_run_setup_restores_existing_database(
 def test_check_remote_drift_warns_when_drive_is_newer(
     app_db_session: Session, caplog: pytest.LogCaptureFixture
 ) -> None:
-    security._fernet.cache_clear()
     oauth_service.save_credentials(app_db_session, _fake_credentials())
 
     fake_client = FakeDriveClient()

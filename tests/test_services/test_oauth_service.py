@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from google.oauth2.credentials import Credentials
 from sqlalchemy.orm import Session
 
-from app.core import security
 from app.services import oauth_service
 
 
@@ -22,7 +21,6 @@ def _fake_credentials(*, refresh_token: str | None = "refresh-abc") -> Credentia
 
 
 def test_save_and_load_credentials_round_trip(app_db_session: Session) -> None:
-    security._fernet.cache_clear()
     credentials = _fake_credentials()
 
     oauth_service.save_credentials(app_db_session, credentials)
@@ -39,14 +37,12 @@ def test_is_connected_false_before_any_save(app_db_session: Session) -> None:
 
 
 def test_is_connected_true_after_save(app_db_session: Session) -> None:
-    security._fernet.cache_clear()
     oauth_service.save_credentials(app_db_session, _fake_credentials())
 
     assert oauth_service.is_connected(app_db_session) is True
 
 
 def test_save_credentials_keeps_prior_refresh_token_when_omitted(app_db_session: Session) -> None:
-    security._fernet.cache_clear()
     oauth_service.save_credentials(app_db_session, _fake_credentials(refresh_token="refresh-abc"))
 
     refreshed = _fake_credentials(refresh_token=None)

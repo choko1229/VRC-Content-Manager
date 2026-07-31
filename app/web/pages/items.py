@@ -18,7 +18,15 @@ from app.db.session import get_db
 from app.models.item import Item
 from app.models.status import Status
 from app.schemas.item import ItemCreate, ItemSearchFilters, ItemUpdate
-from app.services import avatar_service, item_service, oauth_service, shop_service, tag_service, upload_service
+from app.services import (
+    app_config_service,
+    avatar_service,
+    item_service,
+    oauth_service,
+    shop_service,
+    tag_service,
+    upload_service,
+)
 from app.services.upload_service import ValidatedUpload
 from app.web.templating import templates
 
@@ -31,7 +39,6 @@ def _split_csv(raw: str) -> list[str]:
 
 
 def _form_context(db: Session, *, error: str | None = None, form_values: dict | None = None) -> dict:
-    settings = get_settings()
     statuses = db.execute(select(Status).order_by(Status.sort_order)).scalars().all()
     return {
         "shops": [s.name for s in shop_service.list_shops(db)],
@@ -40,7 +47,7 @@ def _form_context(db: Session, *, error: str | None = None, form_values: dict | 
         "statuses": statuses,
         "allowed_extensions": ", ".join(sorted(DEFAULT_ALLOWED_EXTENSIONS)),
         "accept_extensions": ",".join(sorted(DEFAULT_ALLOWED_EXTENSIONS)),
-        "max_upload_size_mb": settings.max_upload_size_mb,
+        "max_upload_size_mb": app_config_service.get_max_upload_size_mb(db),
         "error": error,
         "form_values": form_values or {},
     }
@@ -139,18 +146,19 @@ async def create_item(
         return _error_response("入力内容を確認してください。")
 
     settings = get_settings()
+    max_upload_size_mb = app_config_service.get_max_upload_size_mb(db)
     primary_upload: ValidatedUpload | None = None
     thumbnail_upload: ValidatedUpload | None = None
     try:
         try:
             primary_upload = await upload_service.stream_and_validate_upload(
-                file, dest_dir=settings.upload_tmp_dir, max_size_mb=settings.max_upload_size_mb
+                file, dest_dir=settings.upload_tmp_dir, max_size_mb=max_upload_size_mb
             )
             if thumbnail is not None and thumbnail.filename:
                 thumbnail_upload = await upload_service.stream_and_validate_upload(
                     thumbnail,
                     dest_dir=settings.upload_tmp_dir,
-                    max_size_mb=settings.max_upload_size_mb,
+                    max_size_mb=max_upload_size_mb,
                     allowed_extensions=frozenset({".png", ".jpg", ".jpeg"}),
                 )
         except UploadValidationError as exc:
