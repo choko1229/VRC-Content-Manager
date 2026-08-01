@@ -46,6 +46,12 @@
       <div><dt class="text-slate-500 dark:text-slate-400">価格</dt><dd class="font-medium">{{ item.price if item.price is not none else "-" }}</dd></div>
       <div><dt class="text-slate-500 dark:text-slate-400">形式</dt><dd class="font-medium">{{ item.file_format or "-" }}</dd></div>
     </div>
+    {% if item.file_status %}
+    <div><dt class="text-slate-500 dark:text-slate-400">ファイル状態</dt><dd class="font-medium flex items-center gap-1.5">
+      {{ ui.file_status_dot(item.file_status) }}
+      {{ {"pending": "アップロード済み(Driveへの同期待ち)", "synced": "Driveへ同期済み", "cached": "キャッシュ済み(高速ダウンロード可能)"}[item.file_status] }}
+    </dd></div>
+    {% endif %}
     <div><dt class="text-slate-500 dark:text-slate-400">ステータス</dt><dd class="font-medium">{{ item.status_label or "-" }}</dd></div>
     <div><dt class="text-slate-500 dark:text-slate-400">タグ</dt><dd class="font-medium">{{ item.tags | join(", ") or "-" }}</dd></div>
     <div><dt class="text-slate-500 dark:text-slate-400">対応アバター</dt><dd class="font-medium">{{ item.avatars | join(", ") or "-" }}</dd></div>

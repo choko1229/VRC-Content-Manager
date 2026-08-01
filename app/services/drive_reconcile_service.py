@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -101,7 +102,10 @@ def reconcile(db: Session, drive_client: DriveClient) -> ReconcileResult:
 
 
 def _remove_broken_references(db: Session, drive_client: DriveClient) -> int:
-    files = db.execute(select(ItemFile)).scalars().all()
+    # Files still pending upload_sync_service (synced_at IS NULL, so no
+    # drive_file_id yet either) haven't reached Drive yet by design -- that's
+    # not brokenness, just skip them.
+    files = db.execute(select(ItemFile).where(ItemFile.synced_at.is_not(None))).scalars().all()
     removed = 0
     for file in files:
         try:
@@ -124,9 +128,13 @@ def _migrate_legacy_files(db: Session, drive_client: DriveClient, file_folder_id
     """Move any DB-tracked file that isn't already in the flat `file/` folder into it.
 
     Covers both the pre-restructure per-avatar/shop nested layout and any
-    file left behind in `upload/` from an earlier, interrupted import.
+    file left behind in `upload/` from an earlier, interrupted import. Files
+    still pending upload_sync_service (synced_at IS NULL) have no Drive
+    folder yet and are excluded -- there's nothing to move.
     """
-    files = db.execute(select(ItemFile).where(ItemFile.drive_folder_id != file_folder_id)).scalars().all()
+    files = db.execute(
+        select(ItemFile).where(ItemFile.synced_at.is_not(None), ItemFile.drive_folder_id != file_folder_id)
+    ).scalars().all()
     migrated = 0
     for file in files:
         try:
@@ -242,6 +250,8 @@ def _move_and_attach(
 
 
 def _build_item_file(item_id: int, role: FileRole, drive_file: DriveFile, folder_id: str) -> ItemFile:
+    # Discovered directly on Drive via list_folder, so it's already synced
+    # by definition -- there's no local pending-upload cache copy to speak of.
     return ItemFile(
         item_id=item_id,
         file_role=role,
@@ -251,4 +261,5 @@ def _build_item_file(item_id: int, role: FileRole, drive_file: DriveFile, folder
         stored_filename=f"drive:{drive_file.id}",
         content_type=drive_file.mime_type or None,
         size_bytes=drive_file.size_bytes or 0,
+        synced_at=datetime.now(timezone.utc),
     )

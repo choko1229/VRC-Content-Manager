@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db.session import get_db
 from app.drive.fake_drive_client import FakeDriveClient
 from app.main import app
@@ -54,6 +55,58 @@ def test_download_item_file_success(client_with_item) -> None:
     assert response.status_code == 200
     assert response.content == b"vrm file bytes"
     assert "model.vrm" in response.headers["content-disposition"]
+
+
+def test_download_item_file_populates_and_reuses_download_cache(client_with_item) -> None:
+    client, item_id = client_with_item
+
+    # The cache directory should gain exactly one entry after the first
+    # download, and that same entry should be reused (not re-fetched) on a
+    # second request.
+    cache_dir = get_settings().download_cache_dir
+    before = set(cache_dir.iterdir()) if cache_dir.exists() else set()
+
+    first = client.get(f"/api/v1/items/{item_id}/download")
+    after_first = set(cache_dir.iterdir())
+    assert first.status_code == 200
+    new_entries = after_first - before
+    assert len(new_entries) == 1
+    cached_file = new_entries.pop()
+    mtime_after_first = cached_file.stat().st_mtime
+
+    second = client.get(f"/api/v1/items/{item_id}/download")
+
+    assert second.status_code == 200
+    assert second.content == first.content
+    assert set(cache_dir.iterdir()) == after_first  # no new cache entry created
+    assert cached_file.stat().st_mtime >= mtime_after_first  # touched (sliding TTL), not re-downloaded as a new file
+
+
+def test_download_pending_item_serves_from_local_cache_without_drive(
+    app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    upload = _make_upload(tmp_path, content=b"still pending bytes")
+    created = item_service.create_item_with_file(
+        app_db_session, data=ItemCreate(name="Pending DL", shop_name="Shop"), primary_upload=upload
+    )
+
+    def _fail_if_called(db):
+        raise AssertionError("should not need a Drive client for a pending (not-yet-synced) file")
+
+    def override_get_db():
+        yield app_db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    monkeypatch.setattr(oauth_service, "make_drive_client", _fail_if_called)
+
+    try:
+        with TestClient(app) as client:
+            response = client.get(f"/api/v1/items/{created.id}/download")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    assert response.content == b"still pending bytes"
 
 
 def test_download_nonexistent_item_returns_404(client_with_item) -> None:

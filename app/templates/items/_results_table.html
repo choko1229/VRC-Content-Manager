@@ -6,6 +6,7 @@
     <thead>
       <tr class="border-b border-white/60 dark:border-white/10 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
         <th scope="col" class="px-4 py-3"><span class="sr-only">お気に入り</span></th>
+        <th scope="col" class="px-4 py-3"><span class="sr-only">ファイル状態</span></th>
         <th scope="col" class="px-4 py-3">商品名</th>
         <th scope="col" class="px-4 py-3">ショップ</th>
         <th scope="col" class="px-4 py-3">ステータス</th>
@@ -22,6 +23,7 @@
           data-item-id="{{ item.id }}" data-item-name="{{ item.name }}"
           hx-get="/items/{{ item.id }}" hx-target="#detail-panel" hx-swap="innerHTML" hx-push-url="true">
         <td class="px-4 py-3">{% if item.is_favorite %}<span class="icon text-amber-500" role="img" aria-label="お気に入り">star</span>{% endif %}</td>
+        <td class="px-4 py-3">{{ ui.file_status_dot(item.file_status) }}</td>
         <td class="px-4 py-3 font-medium">
           <a href="/items/{{ item.id }}" class="text-accent dark:text-accent-dark hover:underline">{{ item.name }}</a>
         </td>

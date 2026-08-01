@@ -44,6 +44,27 @@ def test_reconcile_removes_item_file_deleted_directly_on_drive(app_db_session: S
     assert refreshed.files == []  # just the stale file reference is gone
 
 
+def test_reconcile_leaves_pending_unsynced_item_alone(app_db_session: Session, tmp_path: Path) -> None:
+    # Not yet pushed to Drive by upload_sync_service (no drive_client given
+    # at creation) -- reconcile must not treat this as a broken reference
+    # (it has no drive_file_id to check) or try to migrate its folder (it
+    # has no drive_folder_id either).
+    created = item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(name="Still Pending", shop_name="Shop"),
+        primary_upload=_make_upload(tmp_path, "pending-asset.zip"),
+    )
+    fake_client = FakeDriveClient()
+
+    result = drive_reconcile_service.reconcile(app_db_session, fake_client)
+
+    assert result.removed_broken_files == 0
+    assert result.migrated_files == 0
+    refreshed = app_db_session.get(Item, created.id)
+    assert len(refreshed.files) == 1
+    assert refreshed.files[0].synced_at is None
+
+
 def test_reconcile_leaves_intact_references_alone(app_db_session: Session, tmp_path: Path) -> None:
     fake_client = FakeDriveClient()
     created = item_service.create_item_with_file(

@@ -18,7 +18,7 @@ from app.core.error_handlers import register_exception_handlers
 from app.db.migrate import run_migrations
 from app.db.session import get_sessionmaker
 from app.logging_conf import configure_logging
-from app.services import drive_sync_service
+from app.services import drive_sync_service, local_cache_service, upload_sync_service
 from app.web.fragments import items as items_fragments
 from app.web.fragments import settings as settings_fragments
 from app.web.fragments import shops as shops_fragments
@@ -56,17 +56,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.exception("startup Drive drift check failed (continuing with local copy)")
 
     stop_event = asyncio.Event()
-    sync_task = asyncio.create_task(drive_sync_service.sync_loop(stop_event))
+    background_tasks = [
+        asyncio.create_task(drive_sync_service.sync_loop(stop_event)),
+        asyncio.create_task(upload_sync_service.sync_loop(stop_event)),
+        asyncio.create_task(local_cache_service.purge_loop(stop_event)),
+    ]
+    # Catch up on anything left pending from before the last shutdown (a
+    # process restart while an upload was mid-sync, etc.) without waiting
+    # for the first periodic tick. Skipped on a bare/no-DB first run --
+    # there's nothing to query yet.
+    if not drive_sync_service.needs_setup():
+        try:
+            await asyncio.to_thread(upload_sync_service.sync_pending_now)
+        except Exception:
+            logger.exception("startup pending-upload sync failed (will retry on the next sweep)")
     logger.info("startup complete (data_dir=%s)", settings.data_dir)
 
     yield
 
     stop_event.set()
     try:
-        await asyncio.wait_for(sync_task, timeout=10)
+        await asyncio.wait_for(asyncio.gather(*background_tasks), timeout=10)
     except asyncio.TimeoutError:
-        logger.warning("sync loop did not stop within timeout; cancelling")
-        sync_task.cancel()
+        logger.warning("background loops did not stop within timeout; cancelling")
+        for task in background_tasks:
+            task.cancel()
 
     if drive_sync_service.is_dirty():
         try:

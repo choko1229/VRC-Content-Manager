@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-import uuid
 from pathlib import Path
 from urllib.parse import quote
 
@@ -22,11 +22,13 @@ from app.schemas.item import ItemCreate, ItemSearchFilters
 from app.services import (
     app_config_service,
     avatar_service,
+    file_content_service,
     item_service,
     oauth_service,
     shop_service,
     tag_service,
     upload_service,
+    upload_sync_service,
 )
 from app.services.upload_service import ValidatedUpload
 from app.web.templating import templates
@@ -126,17 +128,17 @@ async def create_item(file: UploadFile | None = None, db: Session = Depends(get_
             name=_derive_name_from_filename(primary_upload.original_filename),
             shop_name=UNASSIGNED_SHOP_NAME,
         )
-        try:
-            created = await run_in_threadpool(
-                item_service.create_item_with_file, db, data=item_data, primary_upload=primary_upload
-            )
-        except oauth_service.NotConnectedError:
-            return _error_redirect("Google Driveが未接続です。先に設定から接続してください。")
-        except DriveError as exc:
-            logger.error("item ingest failed: %s", exc, exc_info=True)
-            return _error_redirect(f"Google Driveへのアップロードに失敗しました: {exc}")
+        created = await run_in_threadpool(
+            item_service.create_item_with_file, db, data=item_data, primary_upload=primary_upload
+        )
     finally:
         upload_service.cleanup_upload(primary_upload)
+
+    # Fire-and-forget: push the newly-cached file to Drive in the background
+    # instead of making the upload response wait on it (see
+    # upload_sync_service). The periodic sweep would pick it up anyway --
+    # this just makes it feel instant.
+    asyncio.create_task(asyncio.to_thread(upload_sync_service.sync_pending_now))
 
     return RedirectResponse(url=f"/items/{created.id}", status_code=303)
 
@@ -163,23 +165,19 @@ def item_thumbnail(item_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404)
     thumb = item.thumbnail_file
 
-    try:
-        drive_client = oauth_service.make_drive_client(db)
-    except oauth_service.NotConnectedError as exc:
-        raise HTTPException(status_code=503, detail="Google Driveが未接続です。") from exc
+    drive_client = None
+    if thumb.synced_at is not None:
+        try:
+            drive_client = oauth_service.make_drive_client(db)
+        except oauth_service.NotConnectedError as exc:
+            raise HTTPException(status_code=503, detail="Google Driveが未接続です。") from exc
 
-    settings = get_settings()
-    settings.upload_tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp_path = settings.upload_tmp_dir / f"thumb_{uuid.uuid4().hex}"
     try:
-        drive_client.download_file(file_id=thumb.drive_file_id, dest_path=tmp_path)
-        content = tmp_path.read_bytes()
+        path = file_content_service.resolve_local_path(thumb, drive_client)
     except DriveError as exc:
         raise HTTPException(status_code=502, detail="サムネイルの取得に失敗しました。") from exc
-    finally:
-        tmp_path.unlink(missing_ok=True)
 
-    return Response(content=content, media_type=thumb.content_type or "application/octet-stream")
+    return Response(content=path.read_bytes(), media_type=thumb.content_type or "application/octet-stream")
 
 
 @router.get("/items/{item_id}/edit")

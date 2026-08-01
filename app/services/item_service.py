@@ -1,12 +1,15 @@
-"""Item ingest orchestration: validate -> upload to Drive -> write DB rows.
+"""Item ingest orchestration: cache the upload locally -> write DB rows ->
+sync to Drive in the background.
 
-Ordering is the load-bearing part of this module (see create_item_with_file):
-Drive upload happens first and nothing is committed to the DB until it
-succeeds, so a Drive failure can never leave an orphan DB row. If the DB
-write fails *after* a successful Drive upload, we attempt a compensating
-delete on Drive; if that also fails, it's logged loudly as a
-manual-cleanup-needed case rather than silently swallowed -- that's the one
-failure mode here that can't be fully self-healed.
+create_item_with_file makes no Drive call by default: the validated upload
+is moved into the local pending-upload cache (local_cache_service) and the
+DB row is written immediately, with its ItemFile.synced_at left NULL.
+upload_sync_service pushes pending files to Drive shortly after, off the
+request path entirely -- this is what keeps uploads fast regardless of
+Drive's latency, and lets uploading work even while Drive is unreachable.
+A caller that explicitly passes `drive_client` (tests, or anything that
+wants synchronous/deterministic behavior) gets the file pushed to Drive
+immediately instead of waiting on the background sync.
 """
 
 from __future__ import annotations
@@ -15,13 +18,13 @@ import logging
 import mimetypes
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
-from app.core.exceptions import DriveError, NotFoundError
-from app.drive import folder_layout
+from app.core.exceptions import NotFoundError
 from app.drive.client import DriveClient
 from app.models.avatar import Avatar
 from app.models.item import Item
@@ -39,7 +42,16 @@ from app.schemas.item import (
     ItemUpdate,
     UpdateHistoryRead,
 )
-from app.services import avatar_service, drive_sync_service, oauth_service, shop_service, tag_service, thumbnail_service
+from app.services import (
+    avatar_service,
+    drive_sync_service,
+    local_cache_service,
+    oauth_service,
+    shop_service,
+    tag_service,
+    thumbnail_service,
+    upload_sync_service,
+)
 from app.services.upload_service import ValidatedUpload
 
 logger = logging.getLogger(__name__)
@@ -49,6 +61,16 @@ logger = logging.getLogger(__name__)
 class _ResolvedThumbnail:
     upload: ValidatedUpload
     owned: bool  # True if we created the temp file ourselves (auto-fetch) and must clean it up
+
+
+def _file_status(primary: ItemFile | None) -> str | None:
+    if primary is None:
+        return None
+    if primary.synced_at is None:
+        return "pending"
+    if primary.drive_file_id and local_cache_service.peek_download_cached(primary.drive_file_id):
+        return "cached"
+    return "synced"
 
 
 def _to_read(item: Item) -> ItemRead:
@@ -78,6 +100,7 @@ def _to_list_row(item: Item) -> ItemListRow:
         has_thumbnail=item.thumbnail_file is not None,
         tags=sorted(t.name for t in item.tags),
         avatars=sorted(a.name for a in item.avatars),
+        file_status=_file_status(item.primary_file),
     )
 
 
@@ -105,6 +128,7 @@ def _to_detail(item: Item) -> ItemDetail:
         tags=sorted(t.name for t in item.tags),
         avatars=sorted(a.name for a in item.avatars),
         avatar_registration_name=item.as_avatar.name if item.as_avatar else None,
+        file_status=_file_status(item.primary_file),
         commercial_use=license_.commercial_use if license_ else TriState.UNKNOWN,
         modification_allowed=license_.modification_allowed if license_ else TriState.UNKNOWN,
         redistribution_allowed=license_.redistribution_allowed if license_ else TriState.UNKNOWN,
@@ -170,42 +194,54 @@ def _resolve_edit_thumbnail(item: Item, data: ItemUpdate, thumbnail_upload: Vali
     return _ResolvedThumbnail(upload=_write_fetched_thumbnail(fetched), owned=True)
 
 
+def _delete_file_content(db: Session, item_file: ItemFile, drive_client: DriveClient | None) -> None:
+    """Best-effort removal of an ItemFile's underlying blob -- the Drive file
+    if it's been synced, otherwise its local pending-upload cache copy.
+    Does not touch the DB row; callers delete that themselves."""
+    if item_file.synced_at is not None and item_file.drive_file_id:
+        try:
+            if drive_client is None:
+                drive_client = oauth_service.make_drive_client(db)
+            drive_client.delete_file(item_file.drive_file_id)
+        except Exception:
+            logger.warning(
+                "failed to delete Drive file id=%s for item_file id=%s (non-fatal)",
+                item_file.drive_file_id,
+                item_file.id,
+                exc_info=True,
+            )
+    else:
+        local_cache_service.pending_upload_path(item_file.stored_filename).unlink(missing_ok=True)
+
+
 def _apply_thumbnail(db: Session, item: Item, resolved: _ResolvedThumbnail, drive_client: DriveClient | None) -> None:
-    """Best-effort: an item's metadata edit must never fail because of the thumbnail
-    (matches create_item_with_file's treatment of thumbnails as non-fatal, including
-    for Drive-not-connected -- resolving the client happens inside this try too).
+    """Best-effort: an item's metadata edit must never fail because of the
+    thumbnail. Like create_item_with_file, this caches the file locally and
+    leaves synced_at NULL for upload_sync_service to push in the background,
+    unless the caller explicitly hands us a drive_client for immediate sync.
     """
     try:
-        if drive_client is None:
-            drive_client = oauth_service.make_drive_client(db)
-        folder_id = folder_layout.ensure_file_folder(drive_client)
-        drive_file = drive_client.upload_file(
-            local_path=resolved.upload.path,
-            name=resolved.upload.original_filename,
-            parent_id=folder_id,
-            mime_type=resolved.upload.content_type,
-        )
+        cache_path = _cache_upload_locally(resolved.upload)
         old_thumbnail = item.thumbnail_file
         if old_thumbnail is not None:
-            try:
-                drive_client.delete_file(old_thumbnail.drive_file_id)
-            except Exception:
-                logger.warning("failed to delete replaced thumbnail from Drive (non-fatal)", exc_info=True)
+            _delete_file_content(db, old_thumbnail, drive_client)
             db.delete(old_thumbnail)
             db.flush()
-        db.add(
-            ItemFile(
-                item_id=item.id,
-                file_role=FileRole.THUMBNAIL,
-                drive_file_id=drive_file.id,
-                drive_folder_id=folder_id,
-                original_filename=resolved.upload.original_filename,
-                stored_filename=resolved.upload.path.name,
-                content_type=resolved.upload.content_type,
-                size_bytes=resolved.upload.size_bytes,
-            )
+
+        new_file = ItemFile(
+            item_id=item.id,
+            file_role=FileRole.THUMBNAIL,
+            original_filename=resolved.upload.original_filename,
+            stored_filename=cache_path.name,
+            content_type=resolved.upload.content_type,
+            size_bytes=resolved.upload.size_bytes,
         )
+        db.add(new_file)
         db.commit()
+        db.refresh(new_file)
+
+        if drive_client is not None:
+            upload_sync_service.sync_item_file(db, new_file.id, drive_client)
     except Exception:
         db.rollback()
         logger.warning("thumbnail update failed during item edit (non-fatal)", exc_info=True)
@@ -269,28 +305,21 @@ def update_item(
 def delete_item(db: Session, item_id: int, *, drive_client: DriveClient | None = None) -> None:
     """Deletes the DB row (cascades to files/license/history) unconditionally.
 
-    Drive file cleanup is best-effort: a failure here leaves an orphaned file
-    on Drive (recoverable via the settings integrity check / manual cleanup)
-    rather than blocking the user from removing the item from their library.
+    File cleanup is best-effort: a Drive-delete failure leaves an orphaned
+    file on Drive (recoverable via the settings integrity check / manual
+    cleanup) rather than blocking the user from removing the item from
+    their library. A file still pending sync has its local cache copy
+    removed instead (nothing's reached Drive yet); a synced file also has
+    any download-cache copy dropped, so it doesn't linger for its full TTL.
     """
     item = db.get(Item, item_id)
     if item is None:
         raise NotFoundError("Item", item_id)
 
-    file_ids = [f.drive_file_id for f in item.files]
-    if file_ids:
-        try:
-            if drive_client is None:
-                drive_client = oauth_service.make_drive_client(db)
-            for file_id in file_ids:
-                try:
-                    drive_client.delete_file(file_id)
-                except Exception:
-                    logger.warning(
-                        "failed to delete Drive file id=%s for item id=%s (non-fatal)", file_id, item_id, exc_info=True
-                    )
-        except Exception:
-            logger.warning("could not reach Drive to clean up files for item id=%s (non-fatal)", item_id, exc_info=True)
+    for file in item.files:
+        _delete_file_content(db, file, drive_client)
+        if file.drive_file_id:
+            local_cache_service.forget_download(file.drive_file_id)
 
     db.delete(item)
     db.commit()
@@ -385,6 +414,15 @@ def _resolve_status(db: Session, status_code: str | None) -> Status | None:
     return db.execute(select(Status).where(Status.is_default.is_(True))).scalar_one_or_none()
 
 
+def _cache_upload_locally(upload: ValidatedUpload) -> Path:
+    """Moves a validated upload out of the request-scoped tmp dir into the
+    persistent pending-upload cache, where it survives until
+    upload_sync_service confirms it's been pushed to Drive."""
+    dest = local_cache_service.pending_upload_path(upload.path.name)
+    upload.path.rename(dest)
+    return dest
+
+
 def create_item_with_file(
     db: Session,
     *,
@@ -393,49 +431,9 @@ def create_item_with_file(
     thumbnail_upload: ValidatedUpload | None = None,
     drive_client: DriveClient | None = None,
 ) -> ItemRead:
-    if drive_client is None:
-        drive_client = oauth_service.make_drive_client(db)
-
     resolved_thumbnail = _resolve_thumbnail(data, thumbnail_upload)
+    moved_cache_paths: list[Path] = []
     try:
-        # All Drive I/O (folder + uploads) happens before any DB write below.
-        # get_or_create_shop/tags each do their own db.flush(), which
-        # would otherwise start a write transaction and hold SQLite's
-        # single-writer lock open for the entire network round-trip -- with
-        # concurrent uploads (e.g. dropping several files at once) that's
-        # long enough to blow past the busy_timeout and raise "database is
-        # locked" for whichever request is still waiting.
-        folder_id = folder_layout.ensure_file_folder(drive_client)
-
-        uploaded_drive_file_ids: list[str] = []
-        try:
-            primary_drive_file = drive_client.upload_file(
-                local_path=primary_upload.path,
-                name=primary_upload.original_filename,
-                parent_id=folder_id,
-                mime_type=primary_upload.content_type,
-            )
-            uploaded_drive_file_ids.append(primary_drive_file.id)
-
-            thumbnail_drive_file = None
-            if resolved_thumbnail is not None:
-                try:
-                    thumbnail_drive_file = drive_client.upload_file(
-                        local_path=resolved_thumbnail.upload.path,
-                        name=resolved_thumbnail.upload.original_filename,
-                        parent_id=folder_id,
-                        mime_type=resolved_thumbnail.upload.content_type,
-                    )
-                    uploaded_drive_file_ids.append(thumbnail_drive_file.id)
-                except Exception:
-                    # Thumbnail is best-effort; never fail the whole ingest for it.
-                    logger.warning("thumbnail upload to Drive failed (non-fatal)", exc_info=True)
-                    thumbnail_drive_file = None
-        except Exception as exc:
-            # Nothing has touched the DB yet at this point, so there's
-            # nothing to roll back -- just surface the failure.
-            raise DriveError(f"failed to upload '{primary_upload.original_filename}' to Drive") from exc
-
         try:
             shop = shop_service.get_or_create_shop(db, name=data.shop_name, url=data.shop_url)
             tags = tag_service.get_or_create_tags(db, data.tags)
@@ -460,31 +458,31 @@ def create_item_with_file(
             db.add(item)
             db.flush()
 
-            db.add(
-                ItemFile(
-                    item_id=item.id,
-                    file_role=FileRole.PRIMARY,
-                    drive_file_id=primary_drive_file.id,
-                    drive_folder_id=folder_id,
-                    original_filename=primary_upload.original_filename,
-                    stored_filename=primary_upload.path.name,
-                    content_type=primary_upload.content_type,
-                    size_bytes=primary_upload.size_bytes,
-                )
+            primary_cache_path = _cache_upload_locally(primary_upload)
+            moved_cache_paths.append(primary_cache_path)
+            primary_file = ItemFile(
+                item_id=item.id,
+                file_role=FileRole.PRIMARY,
+                original_filename=primary_upload.original_filename,
+                stored_filename=primary_cache_path.name,
+                content_type=primary_upload.content_type,
+                size_bytes=primary_upload.size_bytes,
             )
-            if thumbnail_drive_file is not None and resolved_thumbnail is not None:
-                db.add(
-                    ItemFile(
-                        item_id=item.id,
-                        file_role=FileRole.THUMBNAIL,
-                        drive_file_id=thumbnail_drive_file.id,
-                        drive_folder_id=folder_id,
-                        original_filename=resolved_thumbnail.upload.original_filename,
-                        stored_filename=resolved_thumbnail.upload.path.name,
-                        content_type=resolved_thumbnail.upload.content_type,
-                        size_bytes=resolved_thumbnail.upload.size_bytes,
-                    )
+            db.add(primary_file)
+
+            thumbnail_file = None
+            if resolved_thumbnail is not None:
+                thumb_cache_path = _cache_upload_locally(resolved_thumbnail.upload)
+                moved_cache_paths.append(thumb_cache_path)
+                thumbnail_file = ItemFile(
+                    item_id=item.id,
+                    file_role=FileRole.THUMBNAIL,
+                    original_filename=resolved_thumbnail.upload.original_filename,
+                    stored_filename=thumb_cache_path.name,
+                    content_type=resolved_thumbnail.upload.content_type,
+                    size_bytes=resolved_thumbnail.upload.size_bytes,
                 )
+                db.add(thumbnail_file)
 
             db.add(
                 License(
@@ -501,25 +499,30 @@ def create_item_with_file(
             db.refresh(item)
         except Exception:
             db.rollback()
-            logger.error(
-                "DB write failed after Drive upload succeeded; attempting compensating delete of %s",
-                uploaded_drive_file_ids,
-            )
-            for file_id in uploaded_drive_file_ids:
-                try:
-                    drive_client.delete_file(file_id)
-                except Exception:
-                    logger.error(
-                        "MANUAL CLEANUP NEEDED: failed to delete orphaned Drive file id=%s "
-                        "after a DB write failure -- it was never recorded in the database",
-                        file_id,
-                        exc_info=True,
-                    )
+            # Nothing committed, so any file already moved into the pending
+            # cache would otherwise be orphaned (no DB row will ever point
+            # at it).
+            for path in moved_cache_paths:
+                path.unlink(missing_ok=True)
             raise
-
-        drive_sync_service.mark_dirty()
-        logger.info("item created id=%s name=%s", item.id, item.name)
-        return _to_read(item)
     finally:
+        # Best-effort BOOTH-fetched thumbnail cleanup: a no-op if it was
+        # already moved into the pending-upload cache above, so this only
+        # actually deletes anything if caching failed partway through.
         if resolved_thumbnail is not None and resolved_thumbnail.owned:
             resolved_thumbnail.upload.path.unlink(missing_ok=True)
+
+    drive_sync_service.mark_dirty()
+
+    # No Drive call above -- the file(s) just sit in the pending-upload cache
+    # until upload_sync_service's background loop pushes them. A caller that
+    # explicitly hands us a drive_client (tests, or anything that wants
+    # synchronous/deterministic behavior) gets that push done immediately instead.
+    if drive_client is not None:
+        upload_sync_service.sync_item_file(db, primary_file.id, drive_client)
+        if thumbnail_file is not None:
+            upload_sync_service.sync_item_file(db, thumbnail_file.id, drive_client)
+        db.refresh(item)
+
+    logger.info("item created id=%s name=%s", item.id, item.name)
+    return _to_read(item)

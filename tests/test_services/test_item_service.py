@@ -12,9 +12,17 @@ from app.drive.fake_drive_client import _FOLDER_MIME_TYPE, FakeDriveClient
 from app.models.item import Item
 from app.models.item_file import FileRole
 from app.models.license import TriState
-from app.models.shop import Shop
 from app.schemas.item import ItemCreate, ItemSearchFilters, ItemUpdate
-from app.services import avatar_service, drive_sync_service, item_service, shop_service, thumbnail_service
+from app.services import (
+    avatar_service,
+    drive_sync_service,
+    file_content_service,
+    item_service,
+    local_cache_service,
+    shop_service,
+    thumbnail_service,
+    upload_sync_service,
+)
 from app.services.upload_service import ValidatedUpload
 
 
@@ -62,37 +70,56 @@ def test_create_item_with_file_success(app_db_session: Session, tmp_path: Path) 
     assert item.license is not None
 
 
-def test_create_item_with_file_defers_db_writes_until_after_drive_upload(
+def test_file_status_is_pending_then_synced_then_cached(app_db_session: Session, tmp_path: Path) -> None:
+    upload = _make_upload(tmp_path)
+    data = ItemCreate(name="Status Progression", shop_name="Shop")
+    created = item_service.create_item_with_file(app_db_session, data=data, primary_upload=upload)
+
+    detail = item_service.get_item_detail(app_db_session, created.id)
+    assert detail.file_status == "pending"
+
+    fake_client = FakeDriveClient()
+    item = app_db_session.get(Item, created.id)
+    upload_sync_service.sync_item_file(app_db_session, item.files[0].id, fake_client)
+
+    detail = item_service.get_item_detail(app_db_session, created.id)
+    assert detail.file_status == "synced"
+
+    file_content_service.resolve_local_path(item.files[0], fake_client)  # populates the download cache
+
+    detail = item_service.get_item_detail(app_db_session, created.id)
+    assert detail.file_status == "cached"
+
+
+def test_search_items_exposes_file_status(app_db_session: Session, tmp_path: Path) -> None:
+    upload = _make_upload(tmp_path)
+    item_service.create_item_with_file(
+        app_db_session, data=ItemCreate(name="List Status", shop_name="Shop"), primary_upload=upload
+    )
+
+    rows = item_service.search_items(app_db_session, ItemSearchFilters())
+
+    assert rows[0].file_status == "pending"
+
+
+def test_create_item_with_file_makes_no_drive_call_without_explicit_client(
     app_db_session: Session, tmp_path: Path
 ) -> None:
-    # Regression test: shop/tag/avatar get_or_create() each call db.flush(),
-    # which starts a SQLite write transaction. If that happened *before* the
-    # (slow, network-bound) Drive upload calls, the write lock would sit
-    # open for the whole round-trip -- harmless for one request, but with
-    # several concurrent uploads (e.g. dropping multiple files at once) the
-    # queued writers can blow past the busy_timeout and raise "database is
-    # locked". Assert no DB write has landed yet at the moment the Drive
-    # upload call fires.
-    fake_client = FakeDriveClient()
+    # The core new guarantee: create_item_with_file never touches Drive on
+    # its own -- the upload is cached locally and the DB row is written
+    # immediately, with synced_at left NULL for upload_sync_service to push
+    # in the background. This is what keeps the request fast regardless of
+    # Drive's latency (and lets uploading work even while Drive is down).
     upload = _make_upload(tmp_path)
-    data = ItemCreate(name="Order Check", shop_name="Order Check Shop", tags=["order-check-tag"])
+    data = ItemCreate(name="No Drive Call", shop_name="Shop")
 
-    shop_existed_during_upload = None
-    original_upload_file = fake_client.upload_file
+    result = item_service.create_item_with_file(app_db_session, data=data, primary_upload=upload)
 
-    def spy_upload_file(*args, **kwargs):
-        nonlocal shop_existed_during_upload
-        shop_existed_during_upload = (
-            app_db_session.execute(select(Shop).where(Shop.name == "Order Check Shop")).scalar_one_or_none()
-            is not None
-        )
-        return original_upload_file(*args, **kwargs)
-
-    fake_client.upload_file = spy_upload_file
-
-    item_service.create_item_with_file(app_db_session, data=data, primary_upload=upload, drive_client=fake_client)
-
-    assert shop_existed_during_upload is False
+    item = app_db_session.get(Item, result.id)
+    file = item.files[0]
+    assert file.synced_at is None
+    assert file.drive_file_id is None
+    assert local_cache_service.pending_upload_path(file.stored_filename).exists()
 
 
 def test_create_item_with_file_reuses_existing_shop(app_db_session: Session, tmp_path: Path) -> None:
@@ -125,9 +152,13 @@ def test_create_item_with_file_uploads_thumbnail_too(app_db_session: Session, tm
     assert roles == {FileRole.PRIMARY, FileRole.THUMBNAIL}
 
 
-def test_create_item_with_file_compensates_drive_upload_on_db_failure(
+def test_create_item_with_file_rolls_back_cleanly_on_db_commit_failure(
     app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # No Drive call happens until *after* a successful commit (see
+    # test_create_item_with_file_makes_no_drive_call_without_explicit_client),
+    # so there's nothing to compensate for here -- just verify the failed
+    # attempt leaves no DB row and the moved-into-cache file behind it.
     fake_client = FakeDriveClient()
     upload = _make_upload(tmp_path)
     data = ItemCreate(name="Broken Item", shop_name="Shop")
@@ -141,24 +172,23 @@ def test_create_item_with_file_compensates_drive_upload_on_db_failure(
         item_service.create_item_with_file(app_db_session, data=data, primary_upload=upload, drive_client=fake_client)
 
     remaining_files = [f for f in fake_client._files.values() if f.mime_type != _FOLDER_MIME_TYPE]
-    assert remaining_files == []  # compensating delete removed the orphaned Drive upload
+    assert remaining_files == []  # Drive was never touched
 
     items = app_db_session.execute(select(Item).where(Item.name == "Broken Item")).scalars().all()
     assert items == []
 
 
-def test_create_item_with_file_leaves_no_drive_orphan_on_upload_failure(
+def test_create_item_with_file_leaves_no_orphan_row_when_caching_fails(
     app_db_session: Session, tmp_path: Path
 ) -> None:
-    fake_client = FakeDriveClient()
     upload = _make_upload(tmp_path)
-    upload.path.unlink()  # make the local file vanish so FakeDriveClient.upload_file fails
-    data = ItemCreate(name="Never Uploaded", shop_name="Shop")
+    upload.path.unlink()  # make the source file vanish so moving it into the pending cache fails
+    data = ItemCreate(name="Never Cached", shop_name="Shop")
 
     with pytest.raises(Exception):
-        item_service.create_item_with_file(app_db_session, data=data, primary_upload=upload, drive_client=fake_client)
+        item_service.create_item_with_file(app_db_session, data=data, primary_upload=upload)
 
-    items = app_db_session.execute(select(Item).where(Item.name == "Never Uploaded")).scalars().all()
+    items = app_db_session.execute(select(Item).where(Item.name == "Never Cached")).scalars().all()
     assert items == []
 
 
@@ -448,6 +478,41 @@ def test_delete_item_still_deletes_row_when_drive_cleanup_fails(app_db_session: 
 def test_delete_item_raises_not_found_for_missing_item(app_db_session: Session) -> None:
     with pytest.raises(NotFoundError):
         item_service.delete_item(app_db_session, 999)
+
+
+def test_delete_item_removes_local_cache_file_for_pending_item(app_db_session: Session, tmp_path: Path) -> None:
+    # Never synced (no drive_client passed to create_item_with_file), so
+    # the only copy is the local pending-upload cache -- deleting the item
+    # must clean that up too, not try to reach Drive for it.
+    upload = _make_upload(tmp_path)
+    created = item_service.create_item_with_file(
+        app_db_session, data=ItemCreate(name="Pending Doomed", shop_name="Shop"), primary_upload=upload
+    )
+    item = app_db_session.get(Item, created.id)
+    cache_path = local_cache_service.pending_upload_path(item.files[0].stored_filename)
+    assert cache_path.exists()
+
+    item_service.delete_item(app_db_session, created.id)
+
+    assert app_db_session.get(Item, created.id) is None
+    assert not cache_path.exists()
+
+
+def test_delete_item_forgets_download_cache_entry(app_db_session: Session, tmp_path: Path) -> None:
+    fake_client = FakeDriveClient()
+    upload = _make_upload(tmp_path)
+    created = item_service.create_item_with_file(
+        app_db_session, data=ItemCreate(name="Cached Doomed", shop_name="Shop"), primary_upload=upload,
+        drive_client=fake_client,
+    )
+    item = app_db_session.get(Item, created.id)
+    drive_file_id = item.files[0].drive_file_id
+    cache_path = local_cache_service.download_cache_path(drive_file_id)
+    cache_path.write_bytes(b"cached copy")
+
+    item_service.delete_item(app_db_session, created.id, drive_client=fake_client)
+
+    assert not cache_path.exists()
 
 
 def test_bulk_update_sets_status_and_favorite_on_all_selected_items(app_db_session: Session, tmp_path: Path) -> None:

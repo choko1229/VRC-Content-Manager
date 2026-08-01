@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
@@ -22,6 +23,7 @@ from app.services import (
     shop_service,
     tag_service,
     upload_service,
+    upload_sync_service,
 )
 from app.services.upload_service import ValidatedUpload
 from app.web.templating import templates
@@ -325,6 +327,11 @@ async def submit_edit_item_panel_fragment(
             raise HTTPException(status_code=404, detail="商品が見つかりません。")
     finally:
         upload_service.cleanup_upload(thumbnail_upload)
+
+    if thumbnail_upload is not None:
+        # Fire-and-forget: push the newly-cached thumbnail to Drive in the
+        # background rather than waiting on it here (see upload_sync_service).
+        asyncio.create_task(asyncio.to_thread(upload_sync_service.sync_pending_now))
 
     if is_avatar:
         try:

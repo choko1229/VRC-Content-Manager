@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.license import TriState
+
+# pending: primary file cached locally, not yet pushed to Drive (red)
+# synced: pushed to Drive, no local download-cache copy right now (green)
+# cached: pushed to Drive and currently has a fresh local download-cache copy (blue)
+FileStatus = Literal["pending", "synced", "cached"]
 
 
 class ItemCreate(BaseModel):
@@ -90,6 +96,7 @@ class ItemListRow(BaseModel):
     has_thumbnail: bool
     tags: list[str]
     avatars: list[str]
+    file_status: FileStatus | None
 
 
 class UpdateHistoryRead(BaseModel):
@@ -119,6 +126,7 @@ class ItemDetail(BaseModel):
     tags: list[str]
     avatars: list[str]
     avatar_registration_name: str | None
+    file_status: FileStatus | None
     commercial_use: TriState
     modification_allowed: TriState
     redistribution_allowed: TriState

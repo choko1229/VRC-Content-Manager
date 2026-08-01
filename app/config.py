@@ -45,6 +45,20 @@ class Settings(BaseSettings):
         return self.data_dir / "tmp" / "uploads"
 
     @property
+    def pending_upload_cache_dir(self) -> Path:
+        """Holds a file between "accepted the upload" and "confirmed pushed
+        to Drive" (see upload_sync_service). Persistent, not time-limited --
+        entries are removed the moment their Drive push succeeds."""
+        return self.data_dir / "cache" / "uploads"
+
+    @property
+    def download_cache_dir(self) -> Path:
+        """A time-limited (see local_cache_service) local cache of files
+        fetched from Drive, keyed by drive_file_id, so repeat downloads and
+        thumbnail views don't re-fetch from Drive every time."""
+        return self.data_dir / "cache" / "downloads"
+
+    @property
     def database_url(self) -> str:
         return f"sqlite:///{self.local_db_path}"
 
