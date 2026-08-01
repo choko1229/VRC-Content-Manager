@@ -29,13 +29,29 @@
   font-weight: 700;
 }
 
-@media (prefers-color-scheme: dark) {
-  .skip-link {
-    background: #409cff;
-    color: #04162e;
-  }
+:root.dark .skip-link {
+  background: #409cff;
+  color: #04162e;
 }
 
 .skip-link:focus {
   top: 0.75rem;
+}
+
+/* Indeterminate progress bar for toast notifications (e.g. an upload whose
+   size isn't known yet). Static fallback for prefers-reduced-motion --
+   still shows *a* bar, just without the sliding motion. */
+.toast-indeterminate {
+  animation: toast-indeterminate-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes toast-indeterminate-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-indeterminate {
+    animation: none;
+  }
 }

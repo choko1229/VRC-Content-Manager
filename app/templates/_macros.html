@@ -5,7 +5,11 @@
    long utility-class strings on every page. #}
 
 {% macro glass(extra="") %}
-<div class="rounded-3xl border border-white/70 dark:border-white/10 bg-white/60 dark:bg-slate-900/50 backdrop-blur-2xl shadow-xl shadow-slate-200/50 dark:shadow-black/30 ring-1 ring-inset ring-white/50 dark:ring-white/10 p-5 sm:p-6 {{ extra }}">
+{# Light-mode opacity floors at 55%: text-slate-500 (used widely for help
+   text/dt labels inside this panel) drops under the 4.5:1 WCAG AA minimum
+   below that against the flat page background -- verified empirically,
+   see PR discussion. Dark mode has much more headroom so stays lower. #}
+<div class="rounded-3xl border border-white/70 dark:border-white/10 bg-white/55 dark:bg-slate-900/35 backdrop-blur-2xl shadow-xl shadow-slate-200/50 dark:shadow-black/30 ring-1 ring-inset ring-white/50 dark:ring-white/10 p-5 sm:p-6 {{ extra }}">
   {{ caller() }}
 </div>
 {% endmacro %}

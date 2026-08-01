@@ -136,17 +136,66 @@
   var dragCounter = 0;
 
   function upload(file) {
+    var toastId = window.Toast.show({
+      title: "アップロード中",
+      message: file.name,
+      progress: 0,
+      duration: 0,
+    });
+
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", "/items/new");
+    xhr.setRequestHeader("X-CSRF-Token", csrfToken);
+
+    xhr.upload.addEventListener("progress", function (e) {
+      if (!e.lengthComputable) return;
+      window.Toast.update(toastId, {
+        title: "アップロード中",
+        message: file.name,
+        progress: Math.round((e.loaded / e.total) * 100),
+        duration: 0,
+      });
+    });
+
+    xhr.addEventListener("load", function () {
+      var finalUrl;
+      try {
+        finalUrl = new URL(xhr.responseURL);
+      } catch (err) {
+        finalUrl = null;
+      }
+      var uploadError = finalUrl && finalUrl.searchParams.get("upload_error");
+      if (uploadError) {
+        window.Toast.update(toastId, {
+          title: "アップロードに失敗しました",
+          message: uploadError,
+          variant: "error",
+          duration: 8000,
+        });
+        return;
+      }
+      window.Toast.update(toastId, {
+        title: "アップロード完了",
+        message: file.name,
+        variant: "success",
+        progress: 100,
+        duration: 1500,
+      });
+      window.location.href = xhr.responseURL;
+    });
+
+    xhr.addEventListener("error", function () {
+      window.Toast.update(toastId, {
+        title: "アップロードに失敗しました",
+        message: "ネットワークエラーが発生しました。",
+        variant: "error",
+        duration: 8000,
+      });
+    });
+
     var body = new FormData();
     body.append("file", file);
-    fetch("/items/new", {
-      method: "POST",
-      body: body,
-      headers: { "X-CSRF-Token": csrfToken },
-    }).then(function (response) {
-      if (response.redirected || response.ok) {
-        window.location.href = response.url;
-      }
-    });
+    xhr.send(body);
   }
 
   input.addEventListener("change", function () {

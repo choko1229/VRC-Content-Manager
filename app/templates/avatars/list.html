@@ -9,7 +9,7 @@
 <div class="grid gap-3 sm:grid-cols-2">
   {% for name, count in avatars %}
   <a href="/items?avatars={{ name | urlencode }}"
-     class="group flex items-center justify-between gap-3 rounded-2xl border border-white/70 dark:border-white/10 bg-white/60 dark:bg-slate-900/50 backdrop-blur-2xl ring-1 ring-inset ring-white/50 dark:ring-white/10 shadow-lg shadow-slate-200/40 dark:shadow-black/20 px-4 py-3 transition motion-safe:hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+     class="group flex items-center justify-between gap-3 rounded-2xl border border-white/70 dark:border-white/10 bg-white/55 dark:bg-slate-900/35 backdrop-blur-2xl ring-1 ring-inset ring-white/50 dark:ring-white/10 shadow-lg shadow-slate-200/40 dark:shadow-black/20 px-4 py-3 transition motion-safe:hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
     <span class="flex items-center gap-2.5 min-w-0">
       <span class="icon text-[1.3rem] text-accent dark:text-accent-dark shrink-0" aria-hidden="true">face</span>
       <span class="font-medium text-slate-900 dark:text-white truncate">{{ name }}</span>

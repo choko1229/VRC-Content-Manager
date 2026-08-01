@@ -9,7 +9,7 @@
 <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
   {% for item in items %}
   {% set placeholder_url, placeholder_text = placeholder_variants[item.id % 4] %}
-  <div class="group rounded-3xl border border-white/60 dark:border-white/10 bg-white/75 dark:bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-slate-200/40 dark:shadow-black/20 overflow-hidden transition motion-safe:hover:shadow-xl motion-safe:hover:-translate-y-0.5">
+  <div class="group rounded-3xl border border-white/60 dark:border-white/10 bg-white/55 dark:bg-slate-900/40 backdrop-blur-xl shadow-lg shadow-slate-200/40 dark:shadow-black/20 overflow-hidden transition motion-safe:hover:shadow-xl motion-safe:hover:-translate-y-0.5">
     <a href="/items/{{ item.id }}"
        hx-get="/items/{{ item.id }}" hx-target="#detail-panel" hx-swap="innerHTML" hx-push-url="true"
        class="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark rounded-t-3xl">
