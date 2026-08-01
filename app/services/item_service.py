@@ -98,11 +98,13 @@ def _to_detail(item: Item) -> ItemDetail:
         file_format=item.file_format,
         status_code=item.status.code if item.status else None,
         status_label=item.status.label if item.status else None,
+        description=item.description,
         memo=item.memo,
         is_favorite=item.is_favorite,
         has_thumbnail=item.thumbnail_file is not None,
         tags=sorted(t.name for t in item.tags),
         avatars=sorted(a.name for a in item.avatars),
+        avatar_registration_name=item.as_avatar.name if item.as_avatar else None,
         commercial_use=license_.commercial_use if license_ else TriState.UNKNOWN,
         modification_allowed=license_.modification_allowed if license_ else TriState.UNKNOWN,
         redistribution_allowed=license_.redistribution_allowed if license_ else TriState.UNKNOWN,
@@ -117,6 +119,7 @@ _DETAIL_LOAD_OPTIONS = (
     selectinload(Item.status),
     selectinload(Item.tags),
     selectinload(Item.avatars),
+    selectinload(Item.as_avatar),
     selectinload(Item.files),
     selectinload(Item.license),
     selectinload(Item.update_history),
@@ -171,17 +174,11 @@ def _apply_thumbnail(db: Session, item: Item, resolved: _ResolvedThumbnail, driv
     """Best-effort: an item's metadata edit must never fail because of the thumbnail
     (matches create_item_with_file's treatment of thumbnails as non-fatal, including
     for Drive-not-connected -- resolving the client happens inside this try too).
-
-    Reuses the item's existing Drive folder (from its primary file) rather than
-    recomputing folder_layout paths -- an edit never moves already-uploaded
-    files, only adds/replaces the thumbnail in place.
     """
-    folder_id = item.primary_file.drive_folder_id if item.primary_file else None
-    if not folder_id:
-        return
     try:
         if drive_client is None:
             drive_client = oauth_service.make_drive_client(db)
+        folder_id = folder_layout.ensure_file_folder(drive_client)
         drive_file = drive_client.upload_file(
             local_path=resolved.upload.path,
             name=resolved.upload.original_filename,
@@ -231,7 +228,7 @@ def update_item(
 
     shop = shop_service.get_or_create_shop(db, name=data.shop_name, url=data.shop_url)
     tags = tag_service.get_or_create_tags(db, data.tags)
-    avatars = avatar_service.get_or_create_avatars(db, data.avatars)
+    avatars = avatar_service.resolve_existing_avatars(db, data.avatars)
     status = _resolve_status(db, data.status_code)
 
     item.shop = shop
@@ -242,6 +239,7 @@ def update_item(
     item.download_date = data.download_date
     item.price = data.price
     item.status = status
+    item.description = data.description
     item.memo = data.memo
     item.is_favorite = data.is_favorite
     item.tags = tags
@@ -321,7 +319,7 @@ def bulk_update(
 
     status = _resolve_status(db, status_code) if status_code else None
     add_tags = tag_service.get_or_create_tags(db, add_tag_names) if add_tag_names else []
-    add_avatars = avatar_service.get_or_create_avatars(db, add_avatar_names) if add_avatar_names else []
+    add_avatars = avatar_service.resolve_existing_avatars(db, add_avatar_names) if add_avatar_names else []
 
     items = db.execute(select(Item).where(Item.id.in_(item_ids))).scalars().all()
     for item in items:
@@ -398,16 +396,16 @@ def create_item_with_file(
     if drive_client is None:
         drive_client = oauth_service.make_drive_client(db)
 
-    shop = shop_service.get_or_create_shop(db, name=data.shop_name, url=data.shop_url)
-    tags = tag_service.get_or_create_tags(db, data.tags)
-    avatars = avatar_service.get_or_create_avatars(db, data.avatars)
-
     resolved_thumbnail = _resolve_thumbnail(data, thumbnail_upload)
     try:
-        first_avatar_name = avatars[0].name if avatars else None
-        folder_id = folder_layout.ensure_item_folder(
-            drive_client, avatar_name=first_avatar_name, shop_name=shop.name, item_name=data.name
-        )
+        # All Drive I/O (folder + uploads) happens before any DB write below.
+        # get_or_create_shop/tags each do their own db.flush(), which
+        # would otherwise start a write transaction and hold SQLite's
+        # single-writer lock open for the entire network round-trip -- with
+        # concurrent uploads (e.g. dropping several files at once) that's
+        # long enough to blow past the busy_timeout and raise "database is
+        # locked" for whichever request is still waiting.
+        folder_id = folder_layout.ensure_file_folder(drive_client)
 
         uploaded_drive_file_ids: list[str] = []
         try:
@@ -434,10 +432,14 @@ def create_item_with_file(
                     logger.warning("thumbnail upload to Drive failed (non-fatal)", exc_info=True)
                     thumbnail_drive_file = None
         except Exception as exc:
-            db.rollback()
+            # Nothing has touched the DB yet at this point, so there's
+            # nothing to roll back -- just surface the failure.
             raise DriveError(f"failed to upload '{primary_upload.original_filename}' to Drive") from exc
 
         try:
+            shop = shop_service.get_or_create_shop(db, name=data.shop_name, url=data.shop_url)
+            tags = tag_service.get_or_create_tags(db, data.tags)
+            avatars = avatar_service.resolve_existing_avatars(db, data.avatars)
             status = _resolve_status(db, data.status_code)
             item = Item(
                 shop=shop,
@@ -449,6 +451,7 @@ def create_item_with_file(
                 price=data.price,
                 file_format=primary_upload.extension.lstrip("."),
                 status=status,
+                description=data.description,
                 memo=data.memo,
                 is_favorite=data.is_favorite,
                 tags=tags,

@@ -19,6 +19,7 @@ def _to_read(shop: Shop) -> ShopRead:
         name=shop.name,
         url=shop.url,
         memo=shop.memo,
+        icon_url=shop.icon_url,
         item_count=len(shop.items),
     )
 
@@ -69,6 +70,24 @@ def update_shop(db: Session, shop_id: int, data: ShopUpdate) -> ShopRead:
     db.refresh(shop)
     drive_sync_service.mark_dirty()
     logger.info("shop updated id=%s", shop.id)
+    return _to_read(shop)
+
+
+def set_shop_fetched_info(db: Session, shop_id: int, *, icon_url: str | None, description: str | None) -> ShopRead:
+    """Applies a BOOTH auto-fetch result (see booth_info_service.try_fetch_shop_info).
+
+    Only fills in icon_url and an empty memo -- an existing user-written memo
+    is never overwritten by a fetched description, matching get_or_create_shop's
+    "never clobber what the user already set" policy for this model.
+    """
+    shop = get_shop(db, shop_id)
+    shop.icon_url = icon_url or shop.icon_url
+    if not shop.memo and description:
+        shop.memo = description
+    db.commit()
+    db.refresh(shop)
+    drive_sync_service.mark_dirty()
+    logger.info("shop fetched-info applied id=%s", shop.id)
     return _to_read(shop)
 
 

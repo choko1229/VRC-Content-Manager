@@ -3,20 +3,29 @@
 Google Drive is treated as the source of truth for *which files exist*:
 
 - A DB file reference whose Drive object no longer resolves (deleted, or
-  moved outside the tracked tree) is dropped -- the item itself is kept
+  moved outside Drive entirely) is dropped -- the item itself is kept
   (metadata/tags/license survive), just the stale file reference goes.
-- A file sitting directly in an avatar/shop_item leaf folder with no
-  matching DB record is imported as a new, minimally-populated item (same
-  philosophy as the quick-upload flow: name from the filename, shop
-  "未設定", details filled in later on the edit page). One item per
-  non-image file; a same-folder image becomes that item's thumbnail. A
-  lone image with no sibling asset file has nothing to attach to and is
-  left alone.
+- A file sitting in `upload/` (dropped there by hand) or directly in `file/`
+  with no matching DB record is imported as a new, minimally-populated item
+  (same philosophy as the quick-upload flow: name from the filename, shop
+  "未設定", details filled in later from the sidebar). A file with no DB
+  record can end up in `file/` itself if a web upload's Drive write
+  succeeded but the follow-up DB write failed and the compensating Drive
+  delete also failed (see the "MANUAL CLEANUP NEEDED" log in
+  item_service.create_item_with_file) -- scanning `file/` too means that
+  failure mode self-heals into a visible item instead of a Drive file the
+  app silently ignores forever. Files are grouped by filename stem so a
+  same-stem image (e.g. `Item.zip` + `Item.png`) becomes that item's
+  thumbnail; a lone image with no sibling asset file has nothing to attach
+  to and is left alone. Files picked up from `upload/` are moved into
+  `file/`; files already in `file/` are attached in place.
+- Any DB-tracked file whose recorded folder isn't the current `file/`
+  folder (i.e. it still lives under the old per-avatar/shop nested layout)
+  is moved into `file/` and its recorded folder updated -- this is what
+  migrates pre-restructure items into the new flat layout.
 
-Only the tree folder_layout itself writes to (root -> avatar -> shop_item
--> files) is walked; the `_db` folder (the SQLite snapshot) is skipped
-entirely. The root folder is resolved via get_or_create_folder, which
-transparently recreates it if it was deleted directly in Drive -- no
+Root/upload/file folders are resolved via get_or_create_folder, which
+transparently recreates them if deleted directly in Drive -- no
 special-cased "was it deleted?" branch needed here.
 """
 
@@ -28,6 +37,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import DriveError
 from app.core.validation import DEFAULT_ALLOWED_EXTENSIONS
 from app.drive import folder_layout
 from app.drive.client import DriveClient
@@ -36,7 +46,7 @@ from app.models.item import Item
 from app.models.item_file import FileRole, ItemFile
 from app.models.license import License
 from app.models.status import Status
-from app.services import avatar_service, drive_sync_service, shop_service
+from app.services import drive_sync_service, shop_service
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +58,7 @@ _UNASSIGNED_SHOP_NAME = "未設定"
 class ReconcileResult:
     removed_broken_files: int
     imported_items: int
+    migrated_files: int
 
 
 def _extension_of(name: str) -> str:
@@ -55,8 +66,13 @@ def _extension_of(name: str) -> str:
     return name.lower()[idx:] if idx != -1 else ""
 
 
+def _stem_of(name: str) -> str:
+    idx = name.rfind(".")
+    return (name[:idx] if idx != -1 else name).strip()
+
+
 def _derive_name(filename: str) -> str:
-    stem = filename.rsplit(".", 1)[0].strip()
+    stem = _stem_of(filename)
     return (stem or filename.strip() or "無題の商品")[:255]
 
 
@@ -65,37 +81,32 @@ def _default_status(db: Session) -> Status | None:
 
 
 def reconcile(db: Session, drive_client: DriveClient) -> ReconcileResult:
-    root_id = folder_layout.ensure_folder_path(drive_client, folder_layout.ROOT_FOLDER_NAME)
+    file_folder_id = folder_layout.ensure_file_folder(drive_client)
+    upload_folder_id = folder_layout.ensure_upload_folder(drive_client)
 
-    seen_file_ids: set[str] = set()
-    leaf_files: dict[tuple[str, str, str], list[DriveFile]] = {}
+    migrated = _migrate_legacy_files(db, drive_client, file_folder_id)
+    imported = _import_unknown_files(db, drive_client, upload_folder_id, file_folder_id)
+    imported += _import_unknown_files(db, drive_client, file_folder_id, file_folder_id)
+    removed = _remove_broken_references(db, drive_client)
 
-    for avatar_folder in drive_client.list_folder(root_id):
-        if avatar_folder.mime_type != FOLDER_MIME_TYPE or avatar_folder.name == folder_layout.DB_FOLDER_NAME:
-            continue
-        for item_folder in drive_client.list_folder(avatar_folder.id):
-            if item_folder.mime_type != FOLDER_MIME_TYPE:
-                continue
-            entries = drive_client.list_folder(item_folder.id)
-            files = [f for f in entries if f.mime_type != FOLDER_MIME_TYPE]
-            for f in files:
-                seen_file_ids.add(f.id)
-            leaf_files[(avatar_folder.name, item_folder.name, item_folder.id)] = files
-
-    removed = _remove_broken_references(db, seen_file_ids)
-    imported = _import_unknown_files(db, leaf_files)
-
-    if removed or imported:
+    if removed or imported or migrated:
         drive_sync_service.mark_dirty()
-    logger.info("Drive reconcile complete: removed_broken_files=%d imported_items=%d", removed, imported)
-    return ReconcileResult(removed_broken_files=removed, imported_items=imported)
+    logger.info(
+        "Drive reconcile complete: removed_broken_files=%d imported_items=%d migrated_files=%d",
+        removed,
+        imported,
+        migrated,
+    )
+    return ReconcileResult(removed_broken_files=removed, imported_items=imported, migrated_files=migrated)
 
 
-def _remove_broken_references(db: Session, seen_file_ids: set[str]) -> int:
+def _remove_broken_references(db: Session, drive_client: DriveClient) -> int:
     files = db.execute(select(ItemFile)).scalars().all()
     removed = 0
     for file in files:
-        if file.drive_file_id not in seen_file_ids:
+        try:
+            drive_client.get_metadata(file.drive_file_id)
+        except DriveError:
             logger.warning(
                 "Drive reconcile: dropping stale reference item_id=%s drive_file_id=%s (%s) -- not found on Drive",
                 file.item_id,
@@ -109,51 +120,88 @@ def _remove_broken_references(db: Session, seen_file_ids: set[str]) -> int:
     return removed
 
 
+def _migrate_legacy_files(db: Session, drive_client: DriveClient, file_folder_id: str) -> int:
+    """Move any DB-tracked file that isn't already in the flat `file/` folder into it.
+
+    Covers both the pre-restructure per-avatar/shop nested layout and any
+    file left behind in `upload/` from an earlier, interrupted import.
+    """
+    files = db.execute(select(ItemFile).where(ItemFile.drive_folder_id != file_folder_id)).scalars().all()
+    migrated = 0
+    for file in files:
+        try:
+            drive_client.move_file(
+                file_id=file.drive_file_id, new_parent_id=file_folder_id, old_parent_id=file.drive_folder_id
+            )
+        except DriveError:
+            logger.warning(
+                "Drive reconcile: failed to migrate file id=%s into file/ folder (non-fatal, will retry next run)",
+                file.drive_file_id,
+                exc_info=True,
+            )
+            continue
+        file.drive_folder_id = file_folder_id
+        migrated += 1
+    if migrated:
+        db.commit()
+    return migrated
+
+
 def _import_unknown_files(
-    db: Session, leaf_files: dict[tuple[str, str, str], list[DriveFile]]
+    db: Session, drive_client: DriveClient, source_folder_id: str, file_folder_id: str
 ) -> int:
+    """Import files sitting in `source_folder_id` with no matching DB record.
+
+    Called once for `upload/` (manual Drive drops) and once for `file/`
+    itself (orphans left behind by a failed post-upload DB write, see the
+    module docstring). When source_folder_id == file_folder_id the file is
+    already in place and no move is needed.
+    """
     known_ids = {row[0] for row in db.execute(select(ItemFile.drive_file_id)).all()}
+    entries = [f for f in drive_client.list_folder(source_folder_id) if f.mime_type != FOLDER_MIME_TYPE]
+    new_files = [f for f in entries if f.id not in known_ids]
+    if not new_files:
+        return 0
+
+    groups: dict[str, list[DriveFile]] = {}
+    for f in new_files:
+        groups.setdefault(_stem_of(f.name), []).append(f)
+
+    status = _default_status(db)
+    shop = shop_service.get_or_create_shop(db, name=_UNASSIGNED_SHOP_NAME, url=None)
     imported = 0
 
-    for (avatar_folder_name, item_folder_name, item_folder_id), files in leaf_files.items():
-        new_files = [f for f in files if f.id not in known_ids]
-        if not new_files:
-            continue
-
+    for group in groups.values():
         primaries = [
             f
-            for f in new_files
+            for f in group
             if _extension_of(f.name) in DEFAULT_ALLOWED_EXTENSIONS and _extension_of(f.name) not in _IMAGE_EXTENSIONS
         ]
-        thumbnail = next((f for f in new_files if _extension_of(f.name) in _IMAGE_EXTENSIONS), None)
+        thumbnail = next((f for f in group if _extension_of(f.name) in _IMAGE_EXTENSIONS), None)
 
         if not primaries:
             if thumbnail is not None:
                 logger.info(
-                    "Drive reconcile: skipping orphan image '%s' in folder '%s' (no asset file to attach it to)",
+                    "Drive reconcile: skipping orphan image '%s' (no asset file to attach it to)",
                     thumbnail.name,
-                    item_folder_name,
                 )
             continue
-
-        avatar_name = None if avatar_folder_name == folder_layout.UNASSIGNED_AVATAR_FOLDER_NAME else avatar_folder_name
-        shop = shop_service.get_or_create_shop(db, name=_UNASSIGNED_SHOP_NAME, url=None)
-        avatars = avatar_service.get_or_create_avatars(db, [avatar_name]) if avatar_name else []
 
         for primary in primaries:
             item = Item(
                 shop=shop,
                 name=_derive_name(primary.name),
                 file_format=_extension_of(primary.name).lstrip("."),
-                status=_default_status(db),
-                avatars=avatars,
+                status=status,
             )
             db.add(item)
             db.flush()
 
-            db.add(_build_item_file(item.id, FileRole.PRIMARY, primary, item_folder_id))
+            _move_and_attach(db, drive_client, item.id, FileRole.PRIMARY, primary, source_folder_id, file_folder_id)
             if thumbnail is not None:
-                db.add(_build_item_file(item.id, FileRole.THUMBNAIL, thumbnail, item_folder_id))
+                _move_and_attach(
+                    db, drive_client, item.id, FileRole.THUMBNAIL, thumbnail, source_folder_id, file_folder_id
+                )
             db.add(License(item_id=item.id))
 
             imported += 1
@@ -167,6 +215,30 @@ def _import_unknown_files(
     if imported:
         db.commit()
     return imported
+
+
+def _move_and_attach(
+    db: Session,
+    drive_client: DriveClient,
+    item_id: int,
+    role: FileRole,
+    drive_file: DriveFile,
+    old_parent_id: str,
+    new_parent_id: str,
+) -> None:
+    folder_id = old_parent_id
+    if old_parent_id != new_parent_id:
+        try:
+            drive_client.move_file(file_id=drive_file.id, new_parent_id=new_parent_id, old_parent_id=old_parent_id)
+            folder_id = new_parent_id
+        except DriveError:
+            logger.warning(
+                "Drive reconcile: failed to move '%s' into file/ folder; leaving reference pointed at its "
+                "current folder (non-fatal)",
+                drive_file.name,
+                exc_info=True,
+            )
+    db.add(_build_item_file(item_id, role, drive_file, folder_id))
 
 
 def _build_item_file(item_id: int, role: FileRole, drive_file: DriveFile, folder_id: str) -> ItemFile:

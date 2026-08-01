@@ -179,7 +179,7 @@ def _ensure_db_file_exists(db: Session, drive_client: DriveClient, drive_file_id
     user deleted the whole root folder by hand).
 
     Item-asset folders already self-heal on the next upload because
-    ensure_item_folder re-queries Drive by name/parent instead of caching an
+    ensure_file_folder re-queries Drive by name/parent instead of caching an
     id (see folder_layout.py) -- but the DB snapshot is referenced by a fixed
     file id with no equivalent "look it up again" step, so it needed this
     explicit check. Recreates the _db folder (itself self-healing even if the

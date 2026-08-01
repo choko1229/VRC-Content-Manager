@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}ショップリスト - VRC Content Manager{% endblock %}
+{% block content %}
+{{ ui.page_title("ショップリスト", icon="storefront") }}
+
+{% if shops %}
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  {% for shop in shops %}
+  {% include "shops/_tile.html" %}
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-slate-500 dark:text-slate-400">まだショップが登録されていません。商品をアップロードすると自動的に登録されます。</p>
+{% endif %}
+{% endblock %}

@@ -56,12 +56,11 @@ def test_items_list_page_renders_both_views(page_client: TestClient) -> None:
         assert response.status_code == 200
 
 
-def test_shops_page_redirects_to_settings(page_client: TestClient) -> None:
-    # Shop management was folded into the 設定 page's "ショップ管理" section.
-    response = page_client.get("/shops", follow_redirects=False)
+def test_shops_page_renders(page_client: TestClient) -> None:
+    response = page_client.get("/shops")
 
-    assert response.status_code in (302, 307)
-    assert response.headers["location"] == "/settings"
+    assert response.status_code == 200
+    assert "ショップリスト" in response.text
 
 
 def test_settings_page_includes_shop_management(page_client: TestClient) -> None:
@@ -107,10 +106,21 @@ def test_item_detail_htmx_request_returns_fragment_only(
     assert 'id="main-content"' not in response.text  # not the full page shell
 
 
-def test_item_edit_page_renders(page_client: TestClient, app_db_session: Session, tmp_path: Path) -> None:
+def test_item_edit_page_redirects_to_item_detail(page_client: TestClient, app_db_session: Session, tmp_path: Path) -> None:
+    # The dedicated edit page was folded into the detail sidebar's in-place
+    # edit mode; the route survives only as a redirect for old bookmarks/links.
     item_id = _create_item(app_db_session, tmp_path)
 
-    response = page_client.get(f"/items/{item_id}/edit")
+    response = page_client.get(f"/items/{item_id}/edit", follow_redirects=False)
+
+    assert response.status_code in (302, 307)
+    assert response.headers["location"] == f"/items/{item_id}"
+
+
+def test_item_edit_panel_fragment_renders(page_client: TestClient, app_db_session: Session, tmp_path: Path) -> None:
+    item_id = _create_item(app_db_session, tmp_path)
+
+    response = page_client.get(f"/fragments/items/{item_id}/edit")
 
     assert response.status_code == 200
     assert 'name="csrf_token"' in response.text

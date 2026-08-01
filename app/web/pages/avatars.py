@@ -12,5 +12,5 @@ router = APIRouter()
 
 @router.get("/avatars")
 def avatars_page(request: Request, db: Session = Depends(get_db)):
-    avatars = avatar_service.list_avatars_with_item_counts(db)
+    avatars = avatar_service.list_avatar_options(db)
     return templates.TemplateResponse(request, "avatars/list.html", {"avatars": avatars})

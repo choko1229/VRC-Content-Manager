@@ -180,3 +180,12 @@ class GoogleDriveClient:
             service.files().delete(fileId=file_id).execute()
         except HttpError as exc:
             raise DriveError(f"failed to delete Drive file {file_id}") from exc
+
+    def move_file(self, *, file_id: str, new_parent_id: str, old_parent_id: str) -> None:
+        service = self._get_service()
+        try:
+            service.files().update(
+                fileId=file_id, addParents=new_parent_id, removeParents=old_parent_id, fields="id, parents"
+            ).execute()
+        except HttpError as exc:
+            raise DriveError(f"failed to move Drive file {file_id}") from exc

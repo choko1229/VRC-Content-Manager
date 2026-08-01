@@ -102,6 +102,67 @@ def _fetch(client: httpx.Client, product_url: str) -> BoothProductInfo | None:
     return _from_json_ld(soup) or _from_meta_tags(soup)
 
 
+@dataclass(slots=True)
+class BoothShopInfo:
+    name: str | None
+    icon_url: str | None
+    description: str | None
+
+
+def _shop_info_from_meta_tags(soup: BeautifulSoup) -> BoothShopInfo | None:
+    # BOOTH shop pages don't carry a Product JSON-LD block (they're not a
+    # single product), so this relies on the same generic OGP convention
+    # _from_meta_tags uses as its product-page fallback.
+    og_title = soup.find("meta", attrs={"property": "og:title"})
+    og_image = soup.find("meta", attrs={"property": "og:image"})
+    og_description = soup.find("meta", attrs={"property": "og:description"})
+    name = (og_title.get("content") if og_title else None) or None
+    icon_url = (og_image.get("content") if og_image else None) or None
+    if not name and not icon_url:
+        return None
+
+    description = og_description.get("content") if og_description else None
+    return BoothShopInfo(
+        name=name,
+        icon_url=icon_url,
+        description=description.strip() if isinstance(description, str) and description.strip() else None,
+    )
+
+
+def _fetch_shop(client: httpx.Client, shop_url: str) -> BoothShopInfo | None:
+    response = client.get(shop_url)
+    response.raise_for_status()
+    if "text/html" not in response.headers.get("content-type", ""):
+        return None
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    return _shop_info_from_meta_tags(soup)
+
+
+def try_fetch_shop_info(shop_url: str | None, *, client: httpx.Client | None = None) -> BoothShopInfo | None:
+    """`client` is injectable for tests (httpx.MockTransport); production callers omit it."""
+    if not shop_url:
+        return None
+
+    try:
+        if not robots_allow(shop_url):
+            logger.info("robots.txt disallows fetching %s; skipping auto shop-info fetch", shop_url)
+            return None
+
+        if client is not None:
+            return _fetch_shop(client, shop_url)
+
+        with httpx.Client(
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            headers={"User-Agent": USER_AGENT},
+            follow_redirects=True,
+        ) as owned_client:
+            return _fetch_shop(owned_client, shop_url)
+    except Exception:
+        logger.warning("shop info auto-fetch failed for %s", shop_url, exc_info=True)
+        return None
+
+
 def match_known_terms(known: list[str], *texts: str | None) -> list[str]:
     """Suggest already-known tag/avatar names that show up in the fetched name/description.
 

@@ -19,6 +19,7 @@ class ItemCreate(BaseModel):
     download_date: date | None = None
     price: int | None = Field(default=None, ge=0)
     status_code: str | None = None
+    description: str | None = None
     memo: str | None = None
     is_favorite: bool = False
     tags: list[str] = Field(default_factory=list)
@@ -56,6 +57,7 @@ class ItemUpdate(BaseModel):
     download_date: date | None = None
     price: int | None = Field(default=None, ge=0)
     status_code: str | None = None
+    description: str | None = None
     memo: str | None = None
     is_favorite: bool = False
     tags: list[str] = Field(default_factory=list)
@@ -110,11 +112,13 @@ class ItemDetail(BaseModel):
     file_format: str | None
     status_code: str | None
     status_label: str | None
+    description: str | None
     memo: str | None
     is_favorite: bool
     has_thumbnail: bool
     tags: list[str]
     avatars: list[str]
+    avatar_registration_name: str | None
     commercial_use: TriState
     modification_allowed: TriState
     redistribution_allowed: TriState

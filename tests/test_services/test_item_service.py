@@ -7,12 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
+from app.drive import folder_layout
 from app.drive.fake_drive_client import _FOLDER_MIME_TYPE, FakeDriveClient
 from app.models.item import Item
 from app.models.item_file import FileRole
 from app.models.license import TriState
+from app.models.shop import Shop
 from app.schemas.item import ItemCreate, ItemSearchFilters, ItemUpdate
-from app.services import drive_sync_service, item_service, shop_service, thumbnail_service
+from app.services import avatar_service, drive_sync_service, item_service, shop_service, thumbnail_service
 from app.services.upload_service import ValidatedUpload
 
 
@@ -38,6 +40,7 @@ def _reset_dirty(app_db_session: Session):
 
 
 def test_create_item_with_file_success(app_db_session: Session, tmp_path: Path) -> None:
+    _register_avatar(app_db_session, tmp_path, "Manuka")
     fake_client = FakeDriveClient()
     upload = _make_upload(tmp_path)
     data = ItemCreate(name="Cool Avatar", shop_name="Test Shop", tags=["衣装", "改変可"], avatars=["Manuka"])
@@ -57,6 +60,39 @@ def test_create_item_with_file_success(app_db_session: Session, tmp_path: Path) 
     assert len(item.files) == 1
     assert item.files[0].file_role == FileRole.PRIMARY
     assert item.license is not None
+
+
+def test_create_item_with_file_defers_db_writes_until_after_drive_upload(
+    app_db_session: Session, tmp_path: Path
+) -> None:
+    # Regression test: shop/tag/avatar get_or_create() each call db.flush(),
+    # which starts a SQLite write transaction. If that happened *before* the
+    # (slow, network-bound) Drive upload calls, the write lock would sit
+    # open for the whole round-trip -- harmless for one request, but with
+    # several concurrent uploads (e.g. dropping multiple files at once) the
+    # queued writers can blow past the busy_timeout and raise "database is
+    # locked". Assert no DB write has landed yet at the moment the Drive
+    # upload call fires.
+    fake_client = FakeDriveClient()
+    upload = _make_upload(tmp_path)
+    data = ItemCreate(name="Order Check", shop_name="Order Check Shop", tags=["order-check-tag"])
+
+    shop_existed_during_upload = None
+    original_upload_file = fake_client.upload_file
+
+    def spy_upload_file(*args, **kwargs):
+        nonlocal shop_existed_during_upload
+        shop_existed_during_upload = (
+            app_db_session.execute(select(Shop).where(Shop.name == "Order Check Shop")).scalar_one_or_none()
+            is not None
+        )
+        return original_upload_file(*args, **kwargs)
+
+    fake_client.upload_file = spy_upload_file
+
+    item_service.create_item_with_file(app_db_session, data=data, primary_upload=upload, drive_client=fake_client)
+
+    assert shop_existed_during_upload is False
 
 
 def test_create_item_with_file_reuses_existing_shop(app_db_session: Session, tmp_path: Path) -> None:
@@ -152,6 +188,13 @@ def _create_item(
     return item_service.create_item_with_file(db, data=data, primary_upload=upload, drive_client=fake_client)
 
 
+def _register_avatar(db: Session, tmp_path: Path, name: str):
+    """Avatars must be backed by an uploaded item (see avatar_service.set_item_as_avatar) --
+    this uploads a throwaway base-model item and registers it under `name`."""
+    base_item = _create_item(db, tmp_path, name=f"{name} base model")
+    return avatar_service.set_item_as_avatar(db, base_item.id, name=name, memo=None)
+
+
 def test_search_items_filters_by_keyword(app_db_session: Session, tmp_path: Path) -> None:
     _create_item(app_db_session, tmp_path, name="Cool Manuka Outfit")
     _create_item(app_db_session, tmp_path, name="Something Else", memo="mentions manuka in memo")
@@ -164,6 +207,8 @@ def test_search_items_filters_by_keyword(app_db_session: Session, tmp_path: Path
 
 
 def test_search_items_filters_by_tag_and_avatar(app_db_session: Session, tmp_path: Path) -> None:
+    _register_avatar(app_db_session, tmp_path, "Manuka")
+    _register_avatar(app_db_session, tmp_path, "Raptor")
     _create_item(app_db_session, tmp_path, name="A", tags=["衣装"], avatars=["Manuka"])
     _create_item(app_db_session, tmp_path, name="B", tags=["衣装"], avatars=["Raptor"])
     _create_item(app_db_session, tmp_path, name="C", tags=["ヘアー"], avatars=["Manuka"])
@@ -210,6 +255,7 @@ def test_get_item_detail_raises_not_found_for_missing_item(app_db_session: Sessi
 
 
 def test_update_item_changes_metadata_and_associations(app_db_session: Session, tmp_path: Path) -> None:
+    _register_avatar(app_db_session, tmp_path, "Avatar1")
     created = _create_item(app_db_session, tmp_path, name="Original Name", shop_name="Old Shop", tags=["old"])
 
     updated = item_service.update_item(
@@ -254,7 +300,7 @@ def test_update_item_attaches_explicit_thumbnail_upload(app_db_session: Session,
     assert updated.has_thumbnail is True
     item = app_db_session.get(Item, created.id)
     assert item.thumbnail_file is not None
-    assert item.thumbnail_file.drive_folder_id == item.primary_file.drive_folder_id
+    assert item.thumbnail_file.drive_folder_id == folder_layout.ensure_file_folder(fake_client)
 
 
 def test_update_item_replaces_existing_thumbnail_and_deletes_old_drive_file(
@@ -425,6 +471,8 @@ def test_bulk_update_sets_status_and_favorite_on_all_selected_items(app_db_sessi
 
 
 def test_bulk_update_adds_tags_and_avatars_without_removing_existing(app_db_session: Session, tmp_path: Path) -> None:
+    _register_avatar(app_db_session, tmp_path, "既存アバター")
+    _register_avatar(app_db_session, tmp_path, "新アバター")
     a = _create_item(app_db_session, tmp_path, name="Tagged A", tags=["既存タグ"], avatars=["既存アバター"])
     b = _create_item(app_db_session, tmp_path, name="Tagged B")
 

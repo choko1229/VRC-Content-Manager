@@ -2,11 +2,11 @@
 {% if error %}
 {{ ui.alert(error, variant="error") }}
 {% elif result is not none %}
-  {% if result.removed_broken_files == 0 and result.imported_items == 0 %}
+  {% if result.removed_broken_files == 0 and result.imported_items == 0 and result.migrated_files == 0 %}
   {{ ui.alert("Driveとの差分はありませんでした。", variant="success") }}
   {% else %}
   {{ ui.alert(
-      "同期しました: 新規インポート " ~ result.imported_items ~ " 件、Drive上で見つからなくなった参照の削除 " ~ result.removed_broken_files ~ " 件。",
+      "同期しました: 新規インポート " ~ result.imported_items ~ " 件、file/フォルダへの移行 " ~ result.migrated_files ~ " 件、Drive上で見つからなくなった参照の削除 " ~ result.removed_broken_files ~ " 件。",
       variant="success"
   ) }}
   {% if result.imported_items %}

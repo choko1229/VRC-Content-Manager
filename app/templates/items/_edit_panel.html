@@ -1,0 +1,84 @@
+{% import "_macros.html" as ui %}
+{% call ui.glass() %}
+  <div class="flex items-start justify-between gap-2 mb-4">
+    <h2 class="flex items-center gap-1.5 text-lg font-medium text-slate-900 dark:text-white min-w-0">
+      <span class="icon text-accent dark:text-accent-dark text-[1.1rem]" aria-hidden="true">edit</span>
+      <span class="truncate">{{ item_name }}を編集</span>
+    </h2>
+    <button type="button" hx-get="/items/{{ item_id }}" hx-target="#detail-panel" hx-swap="innerHTML"
+            class="shrink-0 inline-flex items-center justify-center min-h-9 min-w-9 w-9 h-9 rounded-full text-slate-500 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-white/10 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark" aria-label="キャンセル">
+      <span class="icon" aria-hidden="true">close</span>
+    </button>
+  </div>
+
+  {% if error %}{{ ui.alert(error, variant="error") }}{% endif %}
+
+  <form hx-post="/fragments/items/{{ item_id }}/edit" hx-target="#detail-panel" hx-swap="innerHTML" hx-encoding="multipart/form-data" class="space-y-5">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+
+    {{ ui.text_field("product_url", "BoothURL", type="url", value=form_values.get('product_url', ''),
+        help_text="貼り付けると、サムネイル・タイトル・ショップ名・説明・対応アバター候補を自動取得します。",
+        attrs='hx-get="/fragments/items/fetch-info" hx-trigger="change" hx-target="#fetch-info-result" hx-swap="innerHTML" hx-include="closest form" hx-indicator="#fetch-info-indicator"') }}
+    <p id="fetch-info-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
+      <span class="icon text-[1rem]" aria-hidden="true">progress_activity</span>取得中…
+    </p>
+    <div id="fetch-info-result" aria-live="polite"></div>
+
+    <div>
+      {{ ui.label_for("f-thumbnail", "サムネイル") }}
+      <img id="thumbnail-preview" src="{{ '/items/' ~ item_id ~ '/thumbnail' if has_thumbnail else '' }}" alt="サムネイルプレビュー"
+           class="w-20 h-20 rounded-xl object-cover border border-white/60 dark:border-white/10 mt-1.5 mb-2 {% if not has_thumbnail %}hidden{% endif %}">
+      <input id="f-thumbnail" type="file" name="thumbnail" accept="image/png,image/jpeg"
+             class="block w-full text-sm text-slate-600 dark:text-slate-300 file:mr-3 file:min-h-9 file:px-4 file:rounded-full file:border-0 file:bg-white/70 dark:file:bg-white/10 file:text-slate-800 dark:file:text-slate-100 file:font-semibold file:cursor-pointer hover:file:brightness-95 cursor-pointer">
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">未指定の場合、BoothURLから商品の1枚目の画像を自動取得します(既にサムネイルがある場合は上書きされません)。</p>
+    </div>
+
+    {{ ui.text_field("name", "タイトル", required=True, value=form_values.get('name', '')) }}
+
+    {{ ui.combobox_field("shop_name", "ショップ名", shops, required=True, value=form_values.get('shop_name', '')) }}
+
+    {{ ui.textarea_field("description", "説明", value=form_values.get('description', ''), rows=3) }}
+
+    {{ ui.avatar_checkbox_group(avatar_options, checked_avatar_ids) }}
+
+    <div class="rounded-2xl border border-white/60 dark:border-white/10 bg-white/40 dark:bg-white/5 backdrop-blur p-3">
+      <label class="flex items-center gap-2.5 min-h-9 text-sm font-medium text-slate-700 dark:text-slate-200 cursor-pointer">
+        <input id="f-is_avatar" type="checkbox" name="is_avatar" value="true" {% if is_avatar %}checked{% endif %}
+               class="w-5 h-5 rounded border-slate-300 dark:border-white/20 text-accent dark:text-accent-dark focus-visible:ring-2 focus-visible:ring-accent dark:focus-visible:ring-accent-dark">
+        このアイテムをアバターとして登録する
+      </label>
+      <div id="avatar-registration-fields" class="mt-3 space-y-3 {% if not is_avatar %}hidden{% endif %}">
+        {{ ui.text_field("avatar_name", "アバター名", value=avatar_form_values.get('name', ''), placeholder=form_values.get('name', '')) }}
+        {{ ui.textarea_field("avatar_memo", "アバターのメモ", value=avatar_form_values.get('memo', ''), rows=2) }}
+      </div>
+    </div>
+
+    {{ ui.combobox_field("tags", "タグ(カンマ区切り)", tag_names, value=form_values.get('tags', ''), multi=True) }}
+
+    {{ ui.textarea_field("memo", "メモ", value=form_values.get('memo', ''), rows=3) }}
+
+    <div class="flex gap-2 pt-1">
+      {{ ui.btn("保存", variant="primary", icon="save", type="submit", extra="flex-1") }}
+      {{ ui.btn("キャンセル", variant="secondary", type="button", extra="flex-1", attrs='hx-get="/items/' ~ item_id ~ '" hx-target="#detail-panel" hx-swap="innerHTML"') }}
+    </div>
+  </form>
+{% endcall %}
+
+<script>
+(function () {
+  var input = document.getElementById("f-thumbnail");
+  var preview = document.getElementById("thumbnail-preview");
+  input.addEventListener("change", function () {
+    if (input.files && input.files[0]) {
+      preview.src = URL.createObjectURL(input.files[0]);
+      preview.classList.remove("hidden");
+    }
+  });
+
+  var isAvatarCheckbox = document.getElementById("f-is_avatar");
+  var avatarFields = document.getElementById("avatar-registration-fields");
+  isAvatarCheckbox.addEventListener("change", function () {
+    avatarFields.classList.toggle("hidden", !isAvatarCheckbox.checked);
+  });
+})();
+</script>

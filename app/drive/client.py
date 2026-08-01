@@ -54,3 +54,9 @@ class DriveClient(Protocol):
     def delete_file(self, file_id: str) -> None:
         """Delete a file from Drive. Used for ingest-failure compensation."""
         ...
+
+    def move_file(self, *, file_id: str, new_parent_id: str, old_parent_id: str) -> None:
+        """Move a file to a new parent folder (re-parent, not copy). Used to
+        relocate a file into place after intake, and to migrate legacy files
+        into the current folder layout."""
+        ...

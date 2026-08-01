@@ -125,6 +125,56 @@ def test_try_fetch_product_info_ignores_malformed_json_ld(monkeypatch: pytest.Mo
     assert result.name == "くまさん"
 
 
+HTML_SHOP_PAGE = (
+    '<html><head><meta property="og:title" content="SheepySnow">'
+    '<meta property="og:image" content="https://booth.pximg.net/shop-icon.jpg">'
+    '<meta property="og:description" content="3Dアバターとオリジナル衣装のショップです。"></head></html>'
+)
+
+HTML_SHOP_PAGE_WITHOUT_METADATA = "<html><head></head></html>"
+
+
+def test_try_fetch_shop_info_reads_ogp_tags(monkeypatch: pytest.MonkeyPatch) -> None:
+    _allow_robots(monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=HTML_SHOP_PAGE, headers={"content-type": "text/html"})
+
+    result = booth_info_service.try_fetch_shop_info("https://sheepysnow.booth.pm/", client=_client(handler))
+
+    assert result is not None
+    assert result.name == "SheepySnow"
+    assert result.icon_url == "https://booth.pximg.net/shop-icon.jpg"
+    assert result.description == "3Dアバターとオリジナル衣装のショップです。"
+
+
+def test_try_fetch_shop_info_returns_none_without_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    _allow_robots(monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=HTML_SHOP_PAGE_WITHOUT_METADATA, headers={"content-type": "text/html"})
+
+    result = booth_info_service.try_fetch_shop_info("https://sheepysnow.booth.pm/", client=_client(handler))
+
+    assert result is None
+
+
+def test_try_fetch_shop_info_returns_none_when_robots_disallows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(booth_info_service, "robots_allow", lambda url: False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not fetch when robots.txt disallows")
+
+    result = booth_info_service.try_fetch_shop_info("https://sheepysnow.booth.pm/", client=_client(handler))
+
+    assert result is None
+
+
+def test_try_fetch_shop_info_returns_none_for_empty_url() -> None:
+    assert booth_info_service.try_fetch_shop_info(None) is None
+    assert booth_info_service.try_fetch_shop_info("") is None
+
+
 def test_match_known_terms_finds_case_insensitive_substring_matches() -> None:
     known = ["VRChat想定", "マヌカ", "桔梗", "未使用タグ"]
 

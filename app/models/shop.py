@@ -13,5 +13,6 @@ class Shop(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     url: Mapped[str | None] = mapped_column(String(1024))
     memo: Mapped[str | None] = mapped_column(Text)
+    icon_url: Mapped[str | None] = mapped_column(String(1024))
 
     items: Mapped[list["Item"]] = relationship(back_populates="shop")

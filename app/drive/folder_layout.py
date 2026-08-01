@@ -1,10 +1,14 @@
 """Drive folder layout conventions.
 
-Root: `VRC-ContentManager/`. The SQLite snapshot lives at
-`VRC-ContentManager/_db/app.db`. Item assets live at
-`VRC-ContentManager/{対応アバター}/{ショップ名}_{商品名}/` (see
-app/services/item_service.py, added in Phase 3, for how the avatar segment
-is chosen when an item has zero or multiple avatars).
+Root: `VRC-ContentManager/`, with exactly three top-level folders:
+
+- `_db/app.db` -- the SQLite snapshot (see drive_sync_service).
+- `upload/` -- a "reception" inbox. Files dropped here directly in Drive
+  (outside the app) are picked up by drive_reconcile_service, imported as
+  new items, and moved into `file/`.
+- `file/` -- flat storage for every file the app manages (uploads made
+  through the web UI land here directly; legacy per-avatar/shop nested
+  files are migrated in by drive_reconcile_service).
 
 get_or_create_folder always re-queries Drive by name+parent rather than
 caching an id, so if the root (or any subfolder) is deleted directly in
@@ -19,7 +23,8 @@ from app.drive.client import DriveClient
 ROOT_FOLDER_NAME = "VRC-ContentManager"
 DB_FOLDER_NAME = "_db"
 DB_FILE_NAME = "app.db"
-UNASSIGNED_AVATAR_FOLDER_NAME = "汎用"
+UPLOAD_FOLDER_NAME = "upload"
+FILE_FOLDER_NAME = "file"
 
 
 def ensure_folder_path(client: DriveClient, *segments: str) -> str:
@@ -35,7 +40,9 @@ def ensure_db_folder(client: DriveClient) -> str:
     return ensure_folder_path(client, ROOT_FOLDER_NAME, DB_FOLDER_NAME)
 
 
-def ensure_item_folder(client: DriveClient, *, avatar_name: str | None, shop_name: str, item_name: str) -> str:
-    avatar_segment = avatar_name or UNASSIGNED_AVATAR_FOLDER_NAME
-    item_segment = f"{shop_name}_{item_name}"
-    return ensure_folder_path(client, ROOT_FOLDER_NAME, avatar_segment, item_segment)
+def ensure_upload_folder(client: DriveClient) -> str:
+    return ensure_folder_path(client, ROOT_FOLDER_NAME, UPLOAD_FOLDER_NAME)
+
+
+def ensure_file_folder(client: DriveClient) -> str:
+    return ensure_folder_path(client, ROOT_FOLDER_NAME, FILE_FOLDER_NAME)

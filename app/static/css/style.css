@@ -55,3 +55,17 @@
     animation: none;
   }
 }
+
+/* Skip layout/paint for item cards/rows scrolled out of view -- a real cost
+   saver once the list is long, since the browser doesn't have to keep
+   rendering hundreds of offscreen nodes as you scroll. contain-intrinsic-size
+   is a rough placeholder height/row-height so the scrollbar doesn't jump
+   around as items enter/leave the estimate. */
+.js-item {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 320px;
+}
+
+#item-results table .js-item {
+  contain-intrinsic-size: 0 44px;
+}

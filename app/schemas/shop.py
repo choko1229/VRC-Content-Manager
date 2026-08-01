@@ -26,4 +26,5 @@ class ShopRead(BaseModel):
     name: str
     url: str | None
     memo: str | None
+    icon_url: str | None = None
     item_count: int = 0

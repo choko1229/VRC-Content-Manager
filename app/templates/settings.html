@@ -12,8 +12,12 @@
   <p class="text-sm text-slate-500 dark:text-slate-400">最終同期: {{ last_pushed_at or "まだ同期していません" }}</p>
   <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">自動同期間隔: {{ sync_interval_seconds }}秒(変更を検知してからのデバウンス間隔)</p>
   <div id="sync-status" aria-live="polite"></div>
-  <div class="flex flex-wrap gap-3">
-    {{ ui.btn("今すぐ同期", variant="primary", icon="sync", type="button", attrs='hx-post="/fragments/settings/sync-now" hx-target="#sync-status" hx-swap="innerHTML"') }}
+  <div class="flex flex-wrap items-center gap-3">
+    {{ ui.btn("今すぐ同期", variant="primary", icon="sync", type="button",
+        attrs='hx-post="/fragments/settings/sync-now" hx-target="#sync-status" hx-swap="innerHTML" hx-indicator="#sync-now-indicator" hx-disabled-elt="this"') }}
+    <span id="sync-now-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
+      <span class="icon text-[1rem] animate-spin" aria-hidden="true">progress_activity</span>同期中…
+    </span>
     {{ ui.btn("Googleで再認可する", variant="secondary", icon="refresh", href="/oauth/google/start") }}
   </div>
 {% else %}
@@ -35,14 +39,26 @@
   フォルダ自体が削除されていた場合は自動的に再作成されます。
 </p>
 <div id="drive-reconcile-result" aria-live="polite"></div>
-{{ ui.btn("今すぐ同期", variant="secondary", icon="cloud_sync", type="button", attrs='hx-post="/fragments/settings/drive-reconcile" hx-target="#drive-reconcile-result" hx-swap="innerHTML"') }}
+<div class="flex flex-wrap items-center gap-3">
+  {{ ui.btn("今すぐ同期", variant="secondary", icon="cloud_sync", type="button",
+      attrs='hx-post="/fragments/settings/drive-reconcile" hx-target="#drive-reconcile-result" hx-swap="innerHTML" hx-indicator="#reconcile-indicator" hx-disabled-elt="this"') }}
+  <span id="reconcile-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
+    <span class="icon text-[1rem] animate-spin" aria-hidden="true">progress_activity</span>確認中…
+  </span>
+</div>
 {% endcall %}
 
 {% call ui.glass(extra="mb-6") %}
 <h2 class="text-lg font-medium mb-3">整合性チェック</h2>
 <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">登録済みファイルがDrive上で実際に見つかるかを確認します(変更はせず確認のみ。修正するには上の「Driveと同期」を使ってください)。</p>
 <div id="integrity-check-result" aria-live="polite"></div>
-{{ ui.btn("チェック実行", variant="secondary", icon="fact_check", type="button", attrs='hx-post="/fragments/settings/integrity-check" hx-target="#integrity-check-result" hx-swap="innerHTML"') }}
+<div class="flex flex-wrap items-center gap-3">
+  {{ ui.btn("チェック実行", variant="secondary", icon="fact_check", type="button",
+      attrs='hx-post="/fragments/settings/integrity-check" hx-target="#integrity-check-result" hx-swap="innerHTML" hx-indicator="#integrity-indicator" hx-disabled-elt="this"') }}
+  <span id="integrity-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
+    <span class="icon text-[1rem] animate-spin" aria-hidden="true">progress_activity</span>チェック中…
+  </span>
+</div>
 {% endcall %}
 {% endif %}
 

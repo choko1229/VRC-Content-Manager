@@ -1,0 +1,34 @@
+{% import "_macros.html" as ui %}
+<div id="shop-tile-{{ shop.id }}" class="rounded-3xl border border-white/60 dark:border-white/10 bg-white/70 dark:bg-slate-900/60 shadow-lg shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
+  <div class="flex items-center gap-3 p-4">
+    {% if shop.icon_url %}
+    <img src="{{ shop.icon_url }}" alt="" class="w-12 h-12 rounded-full object-cover border border-white/60 dark:border-white/10 shrink-0">
+    {% else %}
+    <span class="w-12 h-12 rounded-full bg-white/50 dark:bg-white/10 flex items-center justify-center shrink-0">
+      <span class="icon text-xl text-accent dark:text-accent-dark" aria-hidden="true">storefront</span>
+    </span>
+    {% endif %}
+    <div class="min-w-0 flex-1">
+      <p class="font-medium text-slate-900 dark:text-white truncate">{{ shop.name }}</p>
+      {% if shop.url %}<a href="{{ shop.url }}" target="_blank" rel="noopener noreferrer" class="text-xs text-accent dark:text-accent-dark hover:underline truncate block">{{ shop.url }}<span class="sr-only">(新しいタブで開く)</span></a>{% endif %}
+    </div>
+  </div>
+  {% if error %}<div class="px-4 pb-2">{{ ui.alert(error, variant="error", extra="mb-0 py-2 text-xs") }}</div>{% endif %}
+  {% if shop.memo %}<p class="px-4 pb-3 text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{{ shop.memo }}</p>{% endif %}
+  <div class="flex items-center justify-between gap-2 px-4 py-2.5 border-t border-white/50 dark:border-white/10">
+    <a href="/items?shop_id={{ shop.id }}" class="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 hover:underline">
+      <span>アイテムを見る</span>
+      <span class="inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full bg-white/70 dark:bg-white/10 font-medium">{{ shop.item_count }}</span>
+    </a>
+    {% if shop.url %}
+    <span class="inline-flex items-center gap-2">
+      <button type="button" hx-post="/fragments/shops/{{ shop.id }}/fetch-info" hx-target="#shop-tile-{{ shop.id }}" hx-swap="outerHTML"
+              hx-indicator="#shop-fetch-indicator-{{ shop.id }}" hx-disabled-elt="this"
+              class="inline-flex items-center gap-1 text-xs font-medium text-accent dark:text-accent-dark hover:underline disabled:opacity-50">
+        <span class="icon text-[0.95rem]" aria-hidden="true">refresh</span>Boothから取得
+      </button>
+      <span id="shop-fetch-indicator-{{ shop.id }}" class="htmx-indicator icon text-[0.95rem] text-accent dark:text-accent-dark animate-spin" aria-hidden="true">progress_activity</span>
+    </span>
+    {% endif %}
+  </div>
+</div>

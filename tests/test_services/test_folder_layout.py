@@ -13,14 +13,23 @@ def test_ensure_folder_path_creates_nested_folders_once() -> None:
     assert first == second  # idempotent: re-resolving the same path doesn't create duplicates
 
 
-def test_ensure_item_folder_falls_back_to_unassigned_bucket() -> None:
+def test_ensure_file_folder_is_idempotent() -> None:
     client = FakeDriveClient()
 
-    folder_id = folder_layout.ensure_item_folder(
-        client, avatar_name=None, shop_name="MyShop", item_name="CoolItem"
-    )
+    first = folder_layout.ensure_file_folder(client)
+    second = folder_layout.ensure_file_folder(client)
 
     root_id = client.get_or_create_folder(folder_layout.ROOT_FOLDER_NAME)
-    unassigned_id = client.get_or_create_folder(folder_layout.UNASSIGNED_AVATAR_FOLDER_NAME, root_id)
-    item_id = client.get_or_create_folder("MyShop_CoolItem", unassigned_id)
-    assert folder_id == item_id
+    file_id = client.get_or_create_folder(folder_layout.FILE_FOLDER_NAME, root_id)
+    assert first == second == file_id
+
+
+def test_ensure_upload_folder_is_idempotent() -> None:
+    client = FakeDriveClient()
+
+    first = folder_layout.ensure_upload_folder(client)
+    second = folder_layout.ensure_upload_folder(client)
+
+    root_id = client.get_or_create_folder(folder_layout.ROOT_FOLDER_NAME)
+    upload_id = client.get_or_create_folder(folder_layout.UPLOAD_FOLDER_NAME, root_id)
+    assert first == second == upload_id

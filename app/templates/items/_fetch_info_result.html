@@ -2,36 +2,13 @@
 {% if error %}
 {{ ui.alert(error, variant="error") }}
 {% elif info %}
-{{ ui.alert("商品名・ショップ・価格・説明文を自動取得しました。内容を確認のうえ、必要に応じて修正してください。", variant="success") }}
-{% if info.image_url %}
-<div class="flex items-center gap-3 -mt-2 mb-4">
-  <img src="{{ info.image_url }}" alt="" class="w-16 h-16 rounded-xl object-cover border border-white/60 dark:border-white/10 shrink-0">
-  <p class="text-xs text-slate-500 dark:text-slate-400">サムネイルは登録時に商品ページから自動取得されます(下の「サムネイル画像」欄で手動指定すれば上書きできます)。</p>
-</div>
-{% endif %}
-{% if suggested_tags or suggested_avatars %}
-<div class="space-y-2 mb-1">
-  {% if suggested_tags %}
-  <div>
-    <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">タグの候補(クリックで追加)</p>
-    <div class="flex flex-wrap gap-1.5">
-      {% for t in suggested_tags %}{{ ui.suggestion_chip("f-tags", t) }}{% endfor %}
-    </div>
-  </div>
-  {% endif %}
-  {% if suggested_avatars %}
-  <div>
-    <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">対応アバターの候補(クリックで追加)</p>
-    <div class="flex flex-wrap gap-1.5">
-      {% for a in suggested_avatars %}{{ ui.suggestion_chip("f-avatars", a) }}{% endfor %}
-    </div>
-  </div>
-  {% endif %}
-</div>
+{{ ui.alert("サムネイル・タイトル・ショップ名・説明を自動取得しました。内容を確認のうえ、必要に応じて修正してください。", variant="success") }}
+{% if has_suggested_avatars %}
+<p class="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">対応アバターの候補にチェックを入れました。下の一覧で確認・修正してください。</p>
 {% endif %}
 {% if info.name %}{{ ui.oob_field_value("f-name", "name", info.name, required=True) }}{% endif %}
-{% if info.shop_name %}{{ ui.oob_field_value("f-shop_name", "shop_name", info.shop_name, required=True, list_id="shop-list") }}{% endif %}
-{% if info.shop_url %}{{ ui.oob_field_value("f-shop_url", "shop_url", info.shop_url, type="url") }}{% endif %}
-{% if info.price is not none %}{{ ui.oob_field_value("f-price", "price", info.price, type="number") }}{% endif %}
-{% if info.description %}{{ ui.oob_textarea_value("f-memo", "memo", info.description) }}{% endif %}
+{% if info.shop_name %}{{ ui.oob_field_value("f-shop_name", "shop_name", info.shop_name, required=True) }}{% endif %}
+{% if info.description %}{{ ui.oob_textarea_value("f-description", "description", info.description) }}{% endif %}
+{% if info.image_url %}<img id="thumbnail-preview" src="{{ info.image_url }}" alt="サムネイルプレビュー" hx-swap-oob="true" class="w-20 h-20 rounded-xl object-cover border border-white/60 dark:border-white/10 mt-1.5 mb-2">{% endif %}
+{{ ui.avatar_checkbox_group(avatar_options, checked_ids, oob=True) }}
 {% endif %}

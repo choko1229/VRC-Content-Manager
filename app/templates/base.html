@@ -99,6 +99,7 @@
       {% set nav_items = [
         ("/items", "inventory_2", "一覧"),
         ("/avatars", "face", "アバターリスト"),
+        ("/shops", "storefront", "ショップリスト"),
       ] %}
       {% for href, icon, label in nav_items %}
       <a href="{{ href }}"
@@ -241,6 +242,129 @@
       });
 
       return { show: show, update: update, dismiss: dismiss };
+    })();
+  </script>
+
+  <script>
+    /* Custom-styled autocomplete replacing native <datalist> (see
+       _macros.html: combobox_field). Delegated on `document` (not bound
+       per-element) so it works for combobox instances swapped in later by
+       htmx -- the edit panel, BOOTH-fetch OOB updates, bulk-edit panel. */
+    (function () {
+      function boxOf(el) { return el && el.closest ? el.closest("[data-combobox]") : null; }
+      function inputOf(box) { return box.querySelector("input"); }
+      function listOf(box) { return box.querySelector(".js-combobox-list"); }
+      function isMulti(box) { return box.hasAttribute("data-combobox-multi"); }
+
+      function currentTerm(box) {
+        var value = inputOf(box).value;
+        if (!isMulti(box)) return value.trim();
+        var parts = value.split(",");
+        return parts[parts.length - 1].trim();
+      }
+
+      function filterList(box) {
+        var term = currentTerm(box).toLowerCase();
+        var options = listOf(box).querySelectorAll(".js-combobox-option");
+        var anyVisible = false;
+        options.forEach(function (li) {
+          var match = !term || li.dataset.value.toLowerCase().indexOf(term) !== -1;
+          li.classList.toggle("hidden", !match);
+          li.setAttribute("aria-selected", "false");
+          li.classList.remove("bg-accent/10", "dark:bg-accent-dark/10");
+          if (match) anyVisible = true;
+        });
+        return anyVisible;
+      }
+
+      function openList(box) {
+        if (!filterList(box)) { closeList(box); return; }
+        listOf(box).classList.remove("hidden");
+        inputOf(box).setAttribute("aria-expanded", "true");
+      }
+
+      function closeList(box) {
+        listOf(box).classList.add("hidden");
+        inputOf(box).setAttribute("aria-expanded", "false");
+      }
+
+      function setActive(visible, index) {
+        visible.forEach(function (li, i) {
+          var active = i === index;
+          li.setAttribute("aria-selected", String(active));
+          li.classList.toggle("bg-accent/10", active);
+          li.classList.toggle("dark:bg-accent-dark/10", active);
+        });
+        if (visible[index]) visible[index].scrollIntoView({ block: "nearest" });
+      }
+
+      function pickOption(box, value) {
+        var input = inputOf(box);
+        if (isMulti(box)) {
+          var parts = input.value.split(",").map(function (p) { return p.trim(); }).filter(Boolean);
+          parts.pop();
+          parts.push(value);
+          input.value = parts.join(", ") + ", ";
+        } else {
+          input.value = value;
+        }
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        closeList(box);
+        input.focus();
+      }
+
+      document.addEventListener("input", function (e) {
+        var box = boxOf(e.target.closest("[data-combobox] input"));
+        if (box) openList(box);
+      });
+
+      document.addEventListener("focusin", function (e) {
+        var box = boxOf(e.target.closest("[data-combobox] input"));
+        if (box) openList(box);
+      });
+
+      document.addEventListener("focusout", function (e) {
+        var box = boxOf(e.target);
+        if (!box) return;
+        setTimeout(function () {
+          if (!box.contains(document.activeElement)) closeList(box);
+        }, 0);
+      });
+
+      document.addEventListener("mousedown", function (e) {
+        var li = e.target.closest(".js-combobox-option");
+        if (!li) return;
+        e.preventDefault(); // keep focus on the input rather than losing it to the option
+        pickOption(boxOf(li), li.dataset.value);
+      });
+
+      document.addEventListener("keydown", function (e) {
+        var box = boxOf(e.target.closest("[data-combobox] input"));
+        if (!box) return;
+        var list = listOf(box);
+        if (list.classList.contains("hidden")) {
+          if (e.key === "ArrowDown") openList(box);
+          return;
+        }
+        var visible = Array.from(list.querySelectorAll(".js-combobox-option:not(.hidden)"));
+        if (!visible.length) return;
+        var activeIndex = visible.findIndex(function (li) { return li.getAttribute("aria-selected") === "true"; });
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setActive(visible, Math.min(activeIndex + 1, visible.length - 1));
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setActive(visible, Math.max(activeIndex - 1, 0));
+        } else if (e.key === "Enter") {
+          if (activeIndex >= 0) {
+            e.preventDefault();
+            pickOption(box, visible[activeIndex].dataset.value);
+          }
+        } else if (e.key === "Escape") {
+          closeList(box);
+        }
+      });
     })();
   </script>
 </body>

@@ -23,6 +23,7 @@ class Item(TimestampMixin, Base):
     price: Mapped[int | None] = mapped_column(Integer)
     file_format: Mapped[str | None] = mapped_column(String(64))
     status_id: Mapped[int | None] = mapped_column(ForeignKey("statuses.id", ondelete="SET NULL"))
+    description: Mapped[str | None] = mapped_column(Text)
     memo: Mapped[str | None] = mapped_column(Text)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
@@ -42,6 +43,9 @@ class Item(TimestampMixin, Base):
     )
     tags: Mapped[list[Tag]] = relationship(secondary=item_tags, back_populates="items")
     avatars: Mapped[list[Avatar]] = relationship(secondary=item_avatars, back_populates="items")
+    as_avatar: Mapped["Avatar | None"] = relationship(
+        back_populates="base_item", uselist=False, foreign_keys="Avatar.item_id"
+    )
 
     @property
     def primary_file(self) -> "ItemFile | None":

@@ -108,6 +108,12 @@ class FakeDriveClient:
             raise DriveError(f"file not found: {file_id}")
         del self._files[file_id]
 
+    def move_file(self, *, file_id: str, new_parent_id: str, old_parent_id: str) -> None:
+        stored = self._files.get(file_id)
+        if stored is None:
+            raise DriveError(f"file not found: {file_id}")
+        stored.parent_id = new_parent_id
+
     # --- test-only helpers ---
     def _debug_content(self, file_id: str) -> bytes:
         return self._files[file_id].content

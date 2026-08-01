@@ -49,12 +49,10 @@ def test_drive_reconcile_route_imports_new_drive_file(
     fake_client = FakeDriveClient()
     monkeypatch.setattr(oauth_service, "make_drive_client", lambda db: fake_client)
 
-    root_id = folder_layout.ensure_folder_path(fake_client, folder_layout.ROOT_FOLDER_NAME)
-    avatar_id = fake_client.get_or_create_folder("Manuka", root_id)
-    item_folder_id = fake_client.get_or_create_folder("SomeShop_RouteTest", avatar_id)
+    upload_id = folder_layout.ensure_upload_folder(fake_client)
     asset_path = tmp_path / "asset.zip"
     asset_path.write_bytes(b"zip bytes")
-    fake_client.upload_file(local_path=asset_path, name="asset.zip", parent_id=item_folder_id)
+    fake_client.upload_file(local_path=asset_path, name="asset.zip", parent_id=upload_id)
 
     page = client.get("/settings")
     csrf_token = _extract_csrf(page.text)

@@ -72,3 +72,25 @@ def test_get_or_create_shop_reuses_existing_by_name(db_session: Session) -> None
 
     assert reused.id == created.id
     assert reused.url == "https://a.example"  # existing shop's URL is not overwritten
+
+
+def test_set_shop_fetched_info_fills_icon_and_empty_memo(db_session: Session) -> None:
+    created = shop_service.create_shop(db_session, ShopCreate(name="Fetchable Shop"))
+
+    updated = shop_service.set_shop_fetched_info(
+        db_session, created.id, icon_url="https://example.com/icon.png", description="お店の説明"
+    )
+
+    assert updated.icon_url == "https://example.com/icon.png"
+    assert updated.memo == "お店の説明"
+
+
+def test_set_shop_fetched_info_does_not_overwrite_existing_memo(db_session: Session) -> None:
+    created = shop_service.create_shop(db_session, ShopCreate(name="Has Memo", memo="自分で書いたメモ"))
+
+    updated = shop_service.set_shop_fetched_info(
+        db_session, created.id, icon_url="https://example.com/icon.png", description="Boothから取得した説明"
+    )
+
+    assert updated.memo == "自分で書いたメモ"
+    assert updated.icon_url == "https://example.com/icon.png"

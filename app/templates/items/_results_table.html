@@ -5,7 +5,6 @@
     <caption class="sr-only">商品一覧(テーブル表示)</caption>
     <thead>
       <tr class="border-b border-white/60 dark:border-white/10 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-        <th scope="col" class="px-4 py-3 w-10"><span class="sr-only">選択</span></th>
         <th scope="col" class="px-4 py-3"><span class="sr-only">お気に入り</span></th>
         <th scope="col" class="px-4 py-3">商品名</th>
         <th scope="col" class="px-4 py-3">ショップ</th>
@@ -19,16 +18,12 @@
     </thead>
     <tbody class="divide-y divide-white/50 dark:divide-white/5">
       {% for item in items %}
-      <tr class="hover:bg-white/50 dark:hover:bg-white/5 transition">
-        <td class="px-4 py-3">
-          <input type="checkbox" class="js-item-select w-[1.1rem] h-[1.1rem] rounded border-slate-300 dark:border-white/20 text-accent dark:text-accent-dark focus-visible:ring-2 focus-visible:ring-accent dark:focus-visible:ring-accent-dark"
-                 data-item-id="{{ item.id }}" data-item-name="{{ item.name }}" aria-label="「{{ item.name }}」を選択">
-        </td>
+      <tr class="js-item hover:bg-white/50 dark:hover:bg-white/5 transition cursor-pointer"
+          data-item-id="{{ item.id }}" data-item-name="{{ item.name }}"
+          hx-get="/items/{{ item.id }}" hx-target="#detail-panel" hx-swap="innerHTML" hx-push-url="true">
         <td class="px-4 py-3">{% if item.is_favorite %}<span class="icon text-amber-500" role="img" aria-label="お気に入り">star</span>{% endif %}</td>
         <td class="px-4 py-3 font-medium">
-          <a href="/items/{{ item.id }}"
-             hx-get="/items/{{ item.id }}" hx-target="#detail-panel" hx-swap="innerHTML" hx-push-url="true"
-             class="text-accent dark:text-accent-dark hover:underline">{{ item.name }}</a>
+          <a href="/items/{{ item.id }}" class="text-accent dark:text-accent-dark hover:underline">{{ item.name }}</a>
         </td>
         <td class="px-4 py-3">{{ item.shop_name or "" }}</td>
         <td class="px-4 py-3">{{ item.status_label or "" }}</td>
@@ -37,7 +32,8 @@
         <td class="px-4 py-3">{{ item.tags | join(", ") }}</td>
         <td class="px-4 py-3">{{ item.avatars | join(", ") }}</td>
         <td class="px-4 py-3 text-right">
-          <a href="/api/v1/items/{{ item.id }}/download" class="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+          <a href="/api/v1/items/{{ item.id }}/download" hx-on:click="event.stopPropagation()"
+             class="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
             <span class="icon text-[1rem]" aria-hidden="true">download</span><span class="sr-only">{{ item.name }}を</span>ダウンロード
           </a>
         </td>
