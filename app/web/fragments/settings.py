@@ -14,6 +14,12 @@ router = APIRouter(prefix="/fragments/settings", dependencies=[Depends(verify_cs
 
 @router.post("/sync-now")
 async def sync_now(request: Request):
+    # A manually-clicked "sync now" should always attempt a real sync --
+    # including the self-heal check for a Drive DB file that's gone missing
+    # -- even if nothing local has changed since the last push (the dirty
+    # flag is in-memory only and resets on every process restart, so relying
+    # on it alone would leave a user with no way to force a check).
+    drive_sync_service.mark_dirty()
     synced = await drive_sync_service.flush_now_async()
     if synced:
         message = "同期しました。"

@@ -32,6 +32,7 @@ from google.oauth2.credentials import Credentials
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.exceptions import DriveError
 from app.db.migrate import run_migrations
 from app.db.session import get_sessionmaker
 from app.drive import folder_layout
@@ -155,6 +156,8 @@ def flush_now(db: Session, *, drive_client: DriveClient | None = None) -> bool:
             logger.warning("skipping Drive sync: not connected")
             return False
 
+    drive_file_id = _ensure_db_file_exists(db, drive_client, drive_file_id)
+
     settings = get_settings()
     tmp_snapshot = settings.data_dir / "tmp" / f"sync_snapshot_{uuid.uuid4().hex}.db"
     try:
@@ -169,6 +172,47 @@ def flush_now(db: Session, *, drive_client: DriveClient | None = None) -> bool:
     _dirty = False
     logger.info("synced local database to Drive (file_id=%s)", drive_file_id)
     return True
+
+
+def _ensure_db_file_exists(db: Session, drive_client: DriveClient, drive_file_id: str) -> str:
+    """Recover if the Drive file drive_db_file_id points at is gone (e.g. the
+    user deleted the whole root folder by hand).
+
+    Item-asset folders already self-heal on the next upload because
+    ensure_item_folder re-queries Drive by name/parent instead of caching an
+    id (see folder_layout.py) -- but the DB snapshot is referenced by a fixed
+    file id with no equivalent "look it up again" step, so it needed this
+    explicit check. Recreates the _db folder (itself self-healing even if the
+    whole root was deleted) and uploads a fresh snapshot as a new file,
+    persisting the new id so future syncs use it.
+    """
+    try:
+        drive_client.get_metadata(drive_file_id)
+        return drive_file_id
+    except DriveError:
+        logger.warning(
+            "Drive DB file id=%s no longer resolves (deleted?); recreating the _db folder "
+            "and uploading a fresh snapshot",
+            drive_file_id,
+        )
+
+    db_folder_id = folder_layout.ensure_db_folder(drive_client)
+    settings = get_settings()
+    tmp_snapshot = settings.data_dir / "tmp" / f"recover_snapshot_{uuid.uuid4().hex}.db"
+    try:
+        snapshot_db_to(tmp_snapshot)
+        drive_file = drive_client.upload_file(
+            local_path=tmp_snapshot,
+            name=folder_layout.DB_FILE_NAME,
+            parent_id=db_folder_id,
+            mime_type="application/x-sqlite3",
+        )
+    finally:
+        tmp_snapshot.unlink(missing_ok=True)
+
+    app_settings_service.set_setting(db, _SETTING_DRIVE_DB_FILE_ID, drive_file.id)
+    logger.info("recreated Drive DB file (new drive_db_file_id=%s)", drive_file.id)
+    return drive_file.id
 
 
 def check_remote_drift(db: Session, *, drive_client: DriveClient | None = None) -> None:

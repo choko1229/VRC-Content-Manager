@@ -8,6 +8,7 @@ from google.oauth2.credentials import Credentials
 from sqlalchemy.orm import Session
 
 from app.db.session import get_sessionmaker
+from app.drive import folder_layout
 from app.drive.fake_drive_client import FakeDriveClient
 from app.services import app_settings_service, drive_sync_service, oauth_service
 
@@ -60,6 +61,40 @@ def test_mark_dirty_flush_now_pushes_snapshot_and_clears_flag(app_db_session: Se
     assert drive_sync_service.is_dirty() is False
     assert len(fake_client._debug_content(uploaded.id)) > 0
     assert app_settings_service.get_setting(app_db_session, "drive_db_last_pushed_at") is not None
+
+
+def test_flush_now_recreates_db_file_if_deleted_directly_on_drive(app_db_session: Session) -> None:
+    # Reproduces the scenario a user hit in production: they deleted the
+    # whole root folder directly in Drive to test that it regenerates. Item
+    # folders self-heal via get_or_create_folder on the next upload, but the
+    # DB snapshot's fixed drive_db_file_id previously had no equivalent
+    # recovery step and every sync failed forever after.
+    fake_client = FakeDriveClient()
+    root_id = fake_client.get_or_create_folder(folder_layout.ROOT_FOLDER_NAME)
+    db_folder_id = fake_client.get_or_create_folder(folder_layout.DB_FOLDER_NAME, root_id)
+    uploaded = fake_client.upload_file(
+        local_path=drive_sync_service.get_settings().local_db_path,
+        name="app.db",
+        parent_id=db_folder_id,
+        mime_type="application/x-sqlite3",
+    )
+    app_settings_service.set_setting(app_db_session, "drive_db_file_id", uploaded.id)
+
+    # Simulate deleting the entire root folder by hand in Drive.
+    del fake_client._files[uploaded.id]
+    del fake_client._files[db_folder_id]
+    del fake_client._files[root_id]
+
+    drive_sync_service.mark_dirty()
+    synced = drive_sync_service.flush_now(app_db_session, drive_client=fake_client)
+
+    assert synced is True
+    assert drive_sync_service.is_dirty() is False
+    new_file_id = app_settings_service.get_setting(app_db_session, "drive_db_file_id")
+    assert new_file_id != uploaded.id
+    assert len(fake_client._debug_content(new_file_id)) > 0
+    # The folder tree exists again too.
+    assert fake_client.get_or_create_folder(folder_layout.ROOT_FOLDER_NAME) is not None
 
 
 def test_flush_now_is_noop_when_not_dirty(app_db_session: Session) -> None:
