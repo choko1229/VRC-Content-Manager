@@ -173,3 +173,47 @@ def test_delete_item_via_detail_panel(client, tmp_path: Path) -> None:
 
     with pytest.raises(Exception):
         item_service.get_item_detail(db, created.id)
+
+
+def test_bulk_update_route_applies_to_multiple_selected_items(client, tmp_path: Path) -> None:
+    test_client, db = client
+    fake_client = FakeDriveClient()
+
+    a = item_service.create_item_with_file(
+        db, data=ItemCreate(name="Bulk Route A", shop_name="Shop"),
+        primary_upload=_make_upload(tmp_path, "bulk-a.zip"), drive_client=fake_client,
+    )
+    b = item_service.create_item_with_file(
+        db, data=ItemCreate(name="Bulk Route B", shop_name="Shop"),
+        primary_upload=_make_upload(tmp_path, "bulk-b.zip"), drive_client=fake_client,
+    )
+    token = _meta_csrf_token(test_client.get("/items").text)
+
+    response = test_client.post(
+        "/fragments/items/bulk-update",
+        headers={"X-CSRF-Token": token},
+        data={
+            "item_ids": f"{a.id},{b.id}",
+            "status_code": "in_use",
+            "add_tags": "一括タグ",
+            "add_avatars": "",
+            "favorite": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"updated": 2}
+
+    for item_id in (a.id, b.id):
+        detail = item_service.get_item_detail(db, item_id)
+        assert detail.status_code == "in_use"
+        assert detail.tags == ["一括タグ"]
+        assert detail.is_favorite is True
+
+
+def test_bulk_update_route_requires_csrf(client) -> None:
+    test_client, _db = client
+
+    response = test_client.post("/fragments/items/bulk-update", data={"item_ids": "1,2"})
+
+    assert response.status_code == 403

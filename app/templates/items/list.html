@@ -35,12 +35,16 @@
     </form>
     {% endcall %}
 
-    <div class="flex items-center justify-between gap-3 mb-4">
-      <div>
+    <div class="flex items-center justify-between gap-3 mb-4 flex-wrap">
+      <div class="flex items-center gap-3">
         <input id="f-quick-upload" type="file" name="file" accept="{{ accept_extensions }}" multiple class="sr-only">
         <label for="f-quick-upload" title="対応形式: {{ allowed_extensions }} / 上限{{ max_upload_size_mb }}MB"
                class="inline-flex items-center gap-1.5 min-h-9 px-4 rounded-full text-sm font-semibold bg-accent dark:bg-accent-dark text-white dark:text-slate-950 shadow-md shadow-accent/30 hover:brightness-95 transition cursor-pointer focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent dark:focus-within:outline-accent-dark">
           <span class="icon text-[1.1rem]" aria-hidden="true">upload_file</span>アップロード
+        </label>
+        <label class="inline-flex items-center gap-2 min-h-9 text-sm text-slate-600 dark:text-slate-300 cursor-pointer">
+          <input type="checkbox" id="select-all-checkbox" class="w-[1.1rem] h-[1.1rem] rounded border-slate-300 dark:border-white/20 text-accent dark:text-accent-dark focus-visible:ring-2 focus-visible:ring-accent dark:focus-visible:ring-accent-dark">
+          全選択
         </label>
       </div>
       <div class="inline-flex rounded-full border border-white/60 dark:border-white/10 bg-white/60 dark:bg-white/5 backdrop-blur p-1" role="group" aria-label="表示形式">
@@ -52,6 +56,26 @@
                 class="js-view-btn inline-flex items-center gap-1.5 min-h-9 px-4 rounded-full text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
           <span class="icon text-[1.1rem]" aria-hidden="true">table_rows</span>テーブル
         </button>
+      </div>
+    </div>
+
+    <div id="bulk-bar" class="hidden items-center gap-3 flex-wrap mb-4 rounded-2xl border border-accent/30 dark:border-accent-dark/30 bg-accent/10 dark:bg-accent-dark/10 backdrop-blur-xl px-4 py-3">
+      <span id="bulk-count" class="text-sm font-medium text-accent dark:text-accent-dark">0件選択中</span>
+      <button type="button" id="bulk-clear-btn" class="text-sm font-medium text-slate-600 dark:text-slate-300 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark rounded">選択解除</button>
+      <div class="ml-auto flex items-center gap-2 flex-wrap">
+        {{ ui.btn("一括編集", variant="secondary", icon="edit", type="button", attrs='id="bulk-edit-toggle-btn"') }}
+        {{ ui.btn("一括削除", variant="danger", icon="delete", type="button", attrs='id="bulk-delete-btn"') }}
+      </div>
+      <div id="bulk-edit-panel" class="hidden w-full pt-3 mt-1 border-t border-accent/20 dark:border-accent-dark/20">
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {{ ui.select_field("bulk_status_code", "ステータス", [("", "変更しない")] + status_options) }}
+          {{ ui.text_field("bulk_add_tags", "タグを追加", placeholder="カンマ区切り", list_id="tag-list") }}
+          {{ ui.text_field("bulk_add_avatars", "対応アバターを追加", placeholder="カンマ区切り", list_id="avatar-list") }}
+          {{ ui.select_field("bulk_favorite", "お気に入り", [("", "変更しない"), ("true", "追加"), ("false", "解除")]) }}
+        </div>
+        <div class="mt-3">
+          {{ ui.btn("選択中の商品に適用", variant="primary", icon="check", type="button", attrs='id="bulk-apply-btn"') }}
+        </div>
       </div>
     </div>
 
@@ -237,6 +261,147 @@
     if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
       uploadAll(e.dataTransfer.files);
     }
+  });
+})();
+
+(function () {
+  // Multi-select for bulk edit/delete. Selection lives only in memory (a
+  // Map of id -> name, the name kept just for the delete confirmation
+  // prompt) and is intentionally dropped whenever #item-results is
+  // re-rendered (filter change, view toggle, after a bulk action) --
+  // trying to reconcile stale ids against a new result set isn't worth it.
+  var selected = new Map();
+  var csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+  var itemResults = document.getElementById("item-results");
+  var bulkBar = document.getElementById("bulk-bar");
+  var bulkCount = document.getElementById("bulk-count");
+  var bulkEditPanel = document.getElementById("bulk-edit-panel");
+  var selectAllCheckbox = document.getElementById("select-all-checkbox");
+
+  function refreshResultsList() {
+    var form = document.getElementById("filter-form");
+    if (form) htmx.trigger(form, "submit");
+  }
+
+  function updateBulkBar() {
+    var n = selected.size;
+    bulkCount.textContent = n + "件選択中";
+    bulkBar.classList.toggle("hidden", n === 0);
+    bulkBar.classList.toggle("flex", n > 0);
+  }
+
+  function clearSelection() {
+    selected.clear();
+    document.querySelectorAll(".js-item-select").forEach(function (cb) { cb.checked = false; });
+    selectAllCheckbox.checked = false;
+    bulkEditPanel.classList.add("hidden");
+    updateBulkBar();
+  }
+
+  itemResults.addEventListener("change", function (e) {
+    var cb = e.target.closest(".js-item-select");
+    if (!cb) return;
+    if (cb.checked) selected.set(cb.dataset.itemId, cb.dataset.itemName);
+    else selected.delete(cb.dataset.itemId);
+    if (!cb.checked) selectAllCheckbox.checked = false;
+    updateBulkBar();
+  });
+
+  itemResults.addEventListener("htmx:afterSwap", clearSelection);
+
+  selectAllCheckbox.addEventListener("change", function () {
+    var checked = selectAllCheckbox.checked;
+    document.querySelectorAll(".js-item-select").forEach(function (cb) {
+      cb.checked = checked;
+      if (checked) selected.set(cb.dataset.itemId, cb.dataset.itemName);
+      else selected.delete(cb.dataset.itemId);
+    });
+    updateBulkBar();
+  });
+
+  document.getElementById("bulk-clear-btn").addEventListener("click", clearSelection);
+
+  document.getElementById("bulk-edit-toggle-btn").addEventListener("click", function () {
+    bulkEditPanel.classList.toggle("hidden");
+  });
+
+  document.getElementById("bulk-delete-btn").addEventListener("click", function () {
+    if (selected.size === 0) return;
+    var names = Array.from(selected.values());
+    var preview = names.slice(0, 3).join("、") + (names.length > 3 ? " 他" : "");
+    if (!window.confirm(names.length + "件を削除しますか？(" + preview + ") Drive上のファイルも削除され、この操作は取り消せません。")) return;
+
+    var ids = Array.from(selected.keys());
+    var toastId = window.Toast.show({ title: "削除中", message: "0/" + ids.length + "件", progress: 0, duration: 0 });
+    var completed = 0;
+    var failed = 0;
+
+    Promise.all(ids.map(function (id) {
+      return fetch("/fragments/items/" + id, { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } })
+        .then(function (r) { if (!r.ok) failed++; })
+        .catch(function () { failed++; })
+        .then(function () {
+          completed++;
+          window.Toast.update(toastId, {
+            title: "削除中",
+            message: completed + "/" + ids.length + "件",
+            progress: Math.round((completed / ids.length) * 100),
+            duration: 0,
+          });
+        });
+    })).then(function () {
+      window.Toast.update(toastId, {
+        title: failed ? "一部の削除に失敗しました" : "削除しました",
+        message: (ids.length - failed) + "/" + ids.length + "件を削除",
+        variant: failed ? "warning" : "success",
+        progress: 100,
+        duration: failed ? 6000 : 2500,
+      });
+      // The right-side detail panel may be showing one of the just-deleted
+      // items -- a fresh /items load is the simplest way to guarantee it
+      // isn't left pointing at something that no longer exists.
+      window.location.href = "/items";
+    });
+  });
+
+  document.getElementById("bulk-apply-btn").addEventListener("click", function () {
+    if (selected.size === 0) return;
+    var ids = Array.from(selected.keys());
+    var body = new URLSearchParams();
+    body.set("item_ids", ids.join(","));
+    body.set("status_code", document.getElementById("f-bulk_status_code").value);
+    body.set("add_tags", document.getElementById("f-bulk_add_tags").value);
+    body.set("add_avatars", document.getElementById("f-bulk_add_avatars").value);
+    body.set("favorite", document.getElementById("f-bulk_favorite").value);
+
+    var toastId = window.Toast.show({ title: "一括編集を適用中", message: ids.length + "件", indeterminate: true, duration: 0 });
+
+    fetch("/fragments/items/bulk-update", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken, "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error("request failed");
+        return r.json();
+      })
+      .then(function (data) {
+        window.Toast.update(toastId, {
+          title: "一括編集を適用しました",
+          message: (data.updated || 0) + "件を更新しました",
+          variant: "success",
+          duration: 3000,
+        });
+        clearSelection();
+        refreshResultsList();
+      })
+      .catch(function () {
+        window.Toast.update(toastId, {
+          title: "一括編集に失敗しました",
+          variant: "error",
+          duration: 6000,
+        });
+      });
   });
 })();
 </script>

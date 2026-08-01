@@ -71,6 +71,28 @@ def search_items_fragment(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, template, {"items": items})
 
 
+@router.post("/bulk-update", dependencies=[Depends(verify_csrf)])
+def bulk_update_items_fragment(
+    item_ids: str = Form(...),
+    status_code: str = Form(""),
+    add_tags: str = Form(""),
+    add_avatars: str = Form(""),
+    favorite: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    ids = [int(part) for part in item_ids.split(",") if part.strip().isdigit()]
+    is_favorite = {"true": True, "false": False}.get(favorite)
+    updated = item_service.bulk_update(
+        db,
+        ids,
+        status_code=status_code or None,
+        add_tag_names=_split_csv(add_tags),
+        add_avatar_names=_split_csv(add_avatars),
+        is_favorite=is_favorite,
+    )
+    return {"updated": updated}
+
+
 @router.delete("/{item_id}", dependencies=[Depends(verify_csrf)])
 def delete_item_fragment(request: Request, item_id: int, db: Session = Depends(get_db)):
     try:

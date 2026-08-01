@@ -402,3 +402,56 @@ def test_delete_item_still_deletes_row_when_drive_cleanup_fails(app_db_session: 
 def test_delete_item_raises_not_found_for_missing_item(app_db_session: Session) -> None:
     with pytest.raises(NotFoundError):
         item_service.delete_item(app_db_session, 999)
+
+
+def test_bulk_update_sets_status_and_favorite_on_all_selected_items(app_db_session: Session, tmp_path: Path) -> None:
+    a = _create_item(app_db_session, tmp_path, name="Bulk A", status_code="unorganized")
+    b = _create_item(app_db_session, tmp_path, name="Bulk B", status_code="unorganized")
+    untouched = _create_item(app_db_session, tmp_path, name="Bulk C (untouched)", status_code="unorganized")
+
+    updated_count = item_service.bulk_update(
+        app_db_session, [a.id, b.id], status_code="in_use", is_favorite=True
+    )
+
+    assert updated_count == 2
+    for item_id in (a.id, b.id):
+        detail = item_service.get_item_detail(app_db_session, item_id)
+        assert detail.status_code == "in_use"
+        assert detail.is_favorite is True
+
+    detail_untouched = item_service.get_item_detail(app_db_session, untouched.id)
+    assert detail_untouched.status_code == "unorganized"
+    assert detail_untouched.is_favorite is False
+
+
+def test_bulk_update_adds_tags_and_avatars_without_removing_existing(app_db_session: Session, tmp_path: Path) -> None:
+    a = _create_item(app_db_session, tmp_path, name="Tagged A", tags=["既存タグ"], avatars=["既存アバター"])
+    b = _create_item(app_db_session, tmp_path, name="Tagged B")
+
+    item_service.bulk_update(
+        app_db_session, [a.id, b.id], add_tag_names=["新タグ"], add_avatar_names=["新アバター"]
+    )
+
+    detail_a = item_service.get_item_detail(app_db_session, a.id)
+    assert sorted(detail_a.tags) == ["新タグ", "既存タグ"]
+    assert sorted(detail_a.avatars) == ["新アバター", "既存アバター"]
+
+    detail_b = item_service.get_item_detail(app_db_session, b.id)
+    assert detail_b.tags == ["新タグ"]
+    assert detail_b.avatars == ["新アバター"]
+
+
+def test_bulk_update_leaves_unspecified_fields_untouched(app_db_session: Session, tmp_path: Path) -> None:
+    created = _create_item(app_db_session, tmp_path, name="Leave Alone", status_code="imported", tags=["keep"])
+
+    updated_count = item_service.bulk_update(app_db_session, [created.id])
+
+    assert updated_count == 1
+    detail = item_service.get_item_detail(app_db_session, created.id)
+    assert detail.status_code == "imported"
+    assert detail.tags == ["keep"]
+    assert detail.is_favorite is False
+
+
+def test_bulk_update_returns_zero_for_empty_id_list(app_db_session: Session) -> None:
+    assert item_service.bulk_update(app_db_session, [], status_code="in_use") == 0

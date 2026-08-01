@@ -300,6 +300,49 @@ def delete_item(db: Session, item_id: int, *, drive_client: DriveClient | None =
     logger.info("item deleted id=%s", item_id)
 
 
+def bulk_update(
+    db: Session,
+    item_ids: list[int],
+    *,
+    status_code: str | None = None,
+    add_tag_names: list[str] | None = None,
+    add_avatar_names: list[str] | None = None,
+    is_favorite: bool | None = None,
+) -> int:
+    """Applies the same change to many items at once for bulk curation
+    (set status, add tags/avatars, toggle favorite) -- unlike update_item,
+    every field here is optional and a left-unset field is left untouched
+    rather than required. Tags/avatars are unioned onto each item's
+    existing set, never replaced (so "add" can't accidentally remove
+    something an item already had that others in the selection don't).
+    """
+    if not item_ids:
+        return 0
+
+    status = _resolve_status(db, status_code) if status_code else None
+    add_tags = tag_service.get_or_create_tags(db, add_tag_names) if add_tag_names else []
+    add_avatars = avatar_service.get_or_create_avatars(db, add_avatar_names) if add_avatar_names else []
+
+    items = db.execute(select(Item).where(Item.id.in_(item_ids))).scalars().all()
+    for item in items:
+        if status is not None:
+            item.status = status
+        if add_tags:
+            existing_tag_ids = {t.id for t in item.tags}
+            item.tags = item.tags + [t for t in add_tags if t.id not in existing_tag_ids]
+        if add_avatars:
+            existing_avatar_ids = {a.id for a in item.avatars}
+            item.avatars = item.avatars + [a for a in add_avatars if a.id not in existing_avatar_ids]
+        if is_favorite is not None:
+            item.is_favorite = is_favorite
+
+    db.commit()
+    if items:
+        drive_sync_service.mark_dirty()
+    logger.info("bulk update applied to %d item(s)", len(items))
+    return len(items)
+
+
 def add_update_check(db: Session, item_id: int, note: str | None) -> None:
     item = db.get(Item, item_id)
     if item is None:
