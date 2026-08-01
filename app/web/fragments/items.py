@@ -4,12 +4,13 @@ import logging
 
 from fastapi import APIRouter, Depends, Form, Request
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.csrf import verify_csrf
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.schemas.item import ItemSearchFilters
-from app.services import item_service
+from app.services import booth_info_service, item_service
 from app.web.templating import templates
 
 router = APIRouter(prefix="/fragments/items")
@@ -18,6 +19,17 @@ logger = logging.getLogger(__name__)
 
 def _split_csv(raw: str) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+@router.get("/fetch-info")
+async def fetch_info_fragment(request: Request, product_url: str = ""):
+    product_url = product_url.strip()
+    if not product_url:
+        return templates.TemplateResponse(request, "items/_fetch_info_result.html", {"info": None, "error": None})
+
+    info = await run_in_threadpool(booth_info_service.try_fetch_product_info, product_url)
+    error = None if info is not None else "商品情報を自動取得できませんでした。お手数ですが手動で入力してください。"
+    return templates.TemplateResponse(request, "items/_fetch_info_result.html", {"info": info, "error": error})
 
 
 @router.get("")

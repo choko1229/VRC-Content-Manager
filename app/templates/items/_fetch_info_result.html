@@ -1,0 +1,16 @@
+{% import "_macros.html" as ui %}
+{% if error %}
+{{ ui.alert(error, variant="error") }}
+{% elif info %}
+{{ ui.alert("商品情報を自動取得しました。内容を確認のうえ、必要に応じて修正してください。", variant="success") }}
+{% if info.image_url %}
+<div class="flex items-center gap-3 -mt-2 mb-4">
+  <img src="{{ info.image_url }}" alt="" class="w-16 h-16 rounded-xl object-cover border border-white/60 dark:border-white/10 shrink-0">
+  <p class="text-xs text-slate-500 dark:text-slate-400">サムネイルは登録時に商品ページから自動取得されます(下の「サムネイル画像」欄で手動指定すれば上書きできます)。</p>
+</div>
+{% endif %}
+{% if info.name %}{{ ui.oob_field_value("f-name", "name", info.name, required=True) }}{% endif %}
+{% if info.shop_name %}{{ ui.oob_field_value("f-shop_name", "shop_name", info.shop_name, required=True, list_id="shop-list") }}{% endif %}
+{% if info.shop_url %}{{ ui.oob_field_value("f-shop_url", "shop_url", info.shop_url, type="url") }}{% endif %}
+{% if info.price is not none %}{{ ui.oob_field_value("f-price", "price", info.price, type="number") }}{% endif %}
+{% endif %}

@@ -12,17 +12,17 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlparse
-from urllib.robotparser import RobotFileParser
+from urllib.parse import urljoin
 
 import filetype
 import httpx
 from bs4 import BeautifulSoup
 
+from app.services.booth_common import REQUEST_TIMEOUT_SECONDS, USER_AGENT
+from app.services.booth_common import robots_allow as _robots_allow
+
 logger = logging.getLogger(__name__)
 
-USER_AGENT = "BOOTHAssetManagerBot/0.1 (personal single-user asset tracker; thumbnail fetch only)"
-REQUEST_TIMEOUT_SECONDS = 8.0
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
@@ -30,19 +30,6 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 class FetchedThumbnail:
     content: bytes
     content_type: str
-
-
-def _robots_allow(url: str) -> bool:
-    parsed = urlparse(url)
-    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-    parser = RobotFileParser()
-    parser.set_url(robots_url)
-    try:
-        parser.read()
-    except OSError:
-        logger.warning("could not read robots.txt at %s; skipping auto thumbnail fetch", robots_url)
-        return False
-    return parser.can_fetch(USER_AGENT, url)
 
 
 def _fetch(client: httpx.Client, product_url: str) -> FetchedThumbnail | None:

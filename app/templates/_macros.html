@@ -48,6 +48,14 @@
 </div>
 {% endmacro %}
 
+{% macro oob_field_value(field_id, name, value, type="text", required=False, list_id=none) %}
+{# Updates a single already-rendered field's value out-of-band (htmx hx-swap-oob),
+   for prefilling a live form without disturbing surrounding labels/layout. #}
+<input id="{{ field_id }}" type="{{ type }}" name="{{ name }}" value="{{ value }}"
+       {% if required %}required{% endif %} {% if list_id %}list="{{ list_id }}"{% endif %}
+       hx-swap-oob="true" class="{{ input_classes }}">
+{% endmacro %}
+
 {% macro textarea_field(name, label, value="", rows=3, help_text=none, extra="") %}
 {% set field_id = "f-" + name %}
 <div class="{{ extra }}">

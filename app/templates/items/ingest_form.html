@@ -17,9 +17,15 @@
     {{ ui.text_field("shop_name", "ショップ名", required=True, value=form_values.get('shop_name', ''), list_id="shop-list") }}
     <datalist id="shop-list">{% for s in shops %}<option value="{{ s }}">{% endfor %}</datalist>
     {{ ui.text_field("shop_url", "ショップURL", type="url", value=form_values.get('shop_url', '')) }}
-    {{ ui.text_field("product_url", "商品ページURL", type="url", value=form_values.get('product_url', '')) }}
+    {{ ui.text_field("product_url", "商品ページURL", type="url", value=form_values.get('product_url', ''),
+        help_text="BOOTHの商品ページURLを貼り付けると、商品名・ショップ名・価格を自動取得します(取得後も修正できます)。",
+        attrs='hx-get="/fragments/items/fetch-info" hx-trigger="change" hx-target="#fetch-info-result" hx-swap="innerHTML" hx-include="this" hx-indicator="#fetch-info-indicator"') }}
     {{ ui.text_field("download_source_url", "ダウンロード元URL", type="url", value=form_values.get('download_source_url', ''), extra="sm:col-span-2") }}
   </div>
+  <p id="fetch-info-indicator" class="htmx-indicator mt-3 inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
+    <span class="icon text-[1rem]" aria-hidden="true">progress_activity</span>商品情報を取得中…
+  </p>
+  <div id="fetch-info-result" aria-live="polite" class="mt-3"></div>
   {% endcall %}
 
   {% call ui.glass() %}
