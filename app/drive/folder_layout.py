@@ -1,16 +1,22 @@
 """Drive folder layout conventions.
 
-Root: `BOOTH管理/`. The SQLite snapshot lives at `BOOTH管理/_db/app.db`.
-Item assets live at `BOOTH管理/{対応アバター}/{ショップ名}_{商品名}/` (see
+Root: `VRC-ContentManager/`. The SQLite snapshot lives at
+`VRC-ContentManager/_db/app.db`. Item assets live at
+`VRC-ContentManager/{対応アバター}/{ショップ名}_{商品名}/` (see
 app/services/item_service.py, added in Phase 3, for how the avatar segment
 is chosen when an item has zero or multiple avatars).
+
+get_or_create_folder always re-queries Drive by name+parent rather than
+caching an id, so if the root (or any subfolder) is deleted directly in
+Drive, the next ensure_*_folder call transparently recreates it -- no
+special-cased "was it deleted?" handling needed.
 """
 
 from __future__ import annotations
 
 from app.drive.client import DriveClient
 
-ROOT_FOLDER_NAME = "BOOTH管理"
+ROOT_FOLDER_NAME = "VRC-ContentManager"
 DB_FOLDER_NAME = "_db"
 DB_FILE_NAME = "app.db"
 UNASSIGNED_AVATAR_FOLDER_NAME = "汎用"

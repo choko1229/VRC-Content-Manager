@@ -6,9 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.core.exceptions import DriveError
+from app.drive.types import FOLDER_MIME_TYPE as _FOLDER_MIME_TYPE
 from app.drive.types import DriveFile
-
-_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 
 
 @dataclass
@@ -55,6 +54,9 @@ class FakeDriveClient:
             modified_time=datetime.now(timezone.utc),
         )
         return folder_id
+
+    def list_folder(self, parent_id: str) -> list[DriveFile]:
+        return [self._to_drive_file(stored) for stored in self._files.values() if stored.parent_id == parent_id]
 
     def upload_file(
         self,

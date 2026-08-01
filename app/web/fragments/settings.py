@@ -6,7 +6,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.csrf import verify_csrf
 from app.db.session import get_db
-from app.services import drive_sync_service, integrity_service, oauth_service
+from app.services import drive_reconcile_service, drive_sync_service, integrity_service, oauth_service
 from app.web.templating import templates
 
 router = APIRouter(prefix="/fragments/settings", dependencies=[Depends(verify_csrf)])
@@ -39,3 +39,24 @@ async def integrity_check(request: Request, db: Session = Depends(get_db)):
 
     broken = await run_in_threadpool(integrity_service.check_for_broken_references, db, drive_client)
     return templates.TemplateResponse(request, "partials/integrity_check.html", {"broken": broken, "error": None})
+
+
+@router.post("/drive-reconcile")
+async def drive_reconcile(request: Request, db: Session = Depends(get_db)):
+    try:
+        drive_client = oauth_service.make_drive_client(db)
+    except oauth_service.NotConnectedError:
+        return templates.TemplateResponse(
+            request, "partials/drive_reconcile.html", {"error": "Google Driveが未接続です。", "result": None}
+        )
+
+    try:
+        result = await run_in_threadpool(drive_reconcile_service.reconcile, db, drive_client)
+    except Exception:
+        return templates.TemplateResponse(
+            request,
+            "partials/drive_reconcile.html",
+            {"error": "同期中にエラーが発生しました。時間をおいて再度お試しください。", "result": None},
+            status_code=502,
+        )
+    return templates.TemplateResponse(request, "partials/drive_reconcile.html", {"result": result, "error": None})

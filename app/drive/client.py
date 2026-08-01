@@ -19,6 +19,15 @@ class DriveClient(Protocol):
         """Return the id of a folder named `name` under `parent_id` (root if None), creating it if absent."""
         ...
 
+    def list_folder(self, parent_id: str) -> list[DriveFile]:
+        """List the immediate (non-recursive) children of a folder, files and subfolders alike.
+
+        Subfolders have mime_type == app.drive.types.FOLDER_MIME_TYPE; trashed
+        items are excluded. Used for reconciliation against files added/moved/
+        removed directly in Drive, outside the app.
+        """
+        ...
+
     def upload_file(
         self,
         *,

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+
 
 @dataclass(frozen=True, slots=True)
 class DriveFile:

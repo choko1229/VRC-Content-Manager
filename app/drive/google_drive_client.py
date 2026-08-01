@@ -12,11 +12,11 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 from app.core.exceptions import DriveError
+from app.drive.types import FOLDER_MIME_TYPE as _FOLDER_MIME_TYPE
 from app.drive.types import DriveFile
 
 logger = logging.getLogger(__name__)
 
-_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 _METADATA_FIELDS = "id, name, mimeType, parents, modifiedTime, size"
 
 
@@ -94,6 +94,31 @@ class GoogleDriveClient:
             return created["id"]
         except HttpError as exc:
             raise DriveError(f"failed to get/create Drive folder '{name}'") from exc
+
+    def list_folder(self, parent_id: str) -> list[DriveFile]:
+        service = self._get_service()
+        query = f"'{parent_id}' in parents and trashed = false"
+        files: list[DriveFile] = []
+        page_token: str | None = None
+        try:
+            while True:
+                results = (
+                    service.files()
+                    .list(
+                        q=query,
+                        fields=f"nextPageToken, files({_METADATA_FIELDS})",
+                        spaces="drive",
+                        pageToken=page_token,
+                    )
+                    .execute()
+                )
+                files.extend(_to_drive_file(raw) for raw in results.get("files", []))
+                page_token = results.get("nextPageToken")
+                if not page_token:
+                    break
+        except HttpError as exc:
+            raise DriveError(f"failed to list Drive folder {parent_id}") from exc
+        return files
 
     def upload_file(
         self,
