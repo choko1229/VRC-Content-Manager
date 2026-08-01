@@ -10,7 +10,7 @@ from app.config import get_instance_config, get_settings
 from app.core.csrf import verify_csrf
 from app.core.instance_config import save as save_instance_config
 from app.db.session import get_db
-from app.services import app_config_service, app_settings_service, drive_sync_service, oauth_service
+from app.services import app_config_service, app_settings_service, drive_sync_service, oauth_service, shop_service
 from app.web.templating import templates
 
 router = APIRouter()
@@ -109,6 +109,7 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
             "google_oauth_client_id": config.google_oauth_client_id,
             "google_oauth_redirect_uri": config.google_oauth_redirect_uri,
             "app_login_password_set": bool(config.app_login_password),
+            "shops": shop_service.list_shops(db),
             "oauth_error": None,
             "password_error": None,
             "operational_error": None,
@@ -191,6 +192,7 @@ def _settings_response(
             "google_oauth_client_id": config.google_oauth_client_id,
             "google_oauth_redirect_uri": config.google_oauth_redirect_uri,
             "app_login_password_set": bool(config.app_login_password),
+            "shops": shop_service.list_shops(db),
             "oauth_error": oauth_error,
             "password_error": password_error,
             "operational_error": operational_error,

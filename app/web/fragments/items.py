@@ -71,6 +71,15 @@ def search_items_fragment(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, template, {"items": items})
 
 
+@router.delete("/{item_id}", dependencies=[Depends(verify_csrf)])
+def delete_item_fragment(request: Request, item_id: int, db: Session = Depends(get_db)):
+    try:
+        item_service.delete_item(db, item_id)
+    except NotFoundError:
+        pass  # already gone -- collapsing back to the empty state is still the right outcome
+    return templates.TemplateResponse(request, "items/_detail_empty.html", {})
+
+
 @router.post("/{item_id}/update-check", dependencies=[Depends(verify_csrf)])
 def add_update_check_fragment(
     request: Request, item_id: int, note: str = Form(""), db: Session = Depends(get_db)

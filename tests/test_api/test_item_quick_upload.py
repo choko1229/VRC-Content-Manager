@@ -49,13 +49,21 @@ def _csrf_token(page_html: str) -> str:
     return match.group(1)
 
 
+def _meta_csrf_token(page_html: str) -> str:
+    # The TOP page's upload button submits via fetch(), reading the token
+    # from base.html's <meta name="csrf-token"> rather than a form field.
+    match = re.search(r'name="csrf-token" content="([^"]+)"', page_html)
+    assert match is not None
+    return match.group(1)
+
+
 def test_quick_upload_creates_item_with_derived_name_and_redirects_to_edit(client) -> None:
     test_client, db = client
-    token = _csrf_token(test_client.get("/items/new").text)
+    token = _meta_csrf_token(test_client.get("/items").text)
 
     response = test_client.post(
         "/items/new",
-        data={"csrf_token": token},
+        headers={"X-CSRF-Token": token},
         files={"file": ("Cool Avatar v2.unitypackage", b"dummy content", "application/octet-stream")},
         follow_redirects=False,
     )
@@ -73,25 +81,25 @@ def test_quick_upload_creates_item_with_derived_name_and_redirects_to_edit(clien
 
 def test_quick_upload_without_file_returns_error(client) -> None:
     test_client, _db = client
-    token = _csrf_token(test_client.get("/items/new").text)
+    token = _meta_csrf_token(test_client.get("/items").text)
 
-    response = test_client.post("/items/new", data={"csrf_token": token})
+    response = test_client.post("/items/new", headers={"X-CSRF-Token": token})
 
-    assert response.status_code == 422
+    assert response.status_code == 200  # followed the redirect back to /items
     assert "ファイルを選択してください" in response.text
 
 
 def test_quick_upload_rejects_disallowed_extension(client) -> None:
     test_client, _db = client
-    token = _csrf_token(test_client.get("/items/new").text)
+    token = _meta_csrf_token(test_client.get("/items").text)
 
     response = test_client.post(
         "/items/new",
-        data={"csrf_token": token},
+        headers={"X-CSRF-Token": token},
         files={"file": ("virus.exe", b"dummy content", "application/octet-stream")},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 200
     assert "許可されていないファイル形式です" in response.text
 
 
@@ -144,3 +152,24 @@ def test_edit_item_with_thumbnail_upload_attaches_thumbnail(client, tmp_path: Pa
     edit_page = test_client.get(f"/items/{created.id}/edit")
     assert edit_page.status_code == 200
     assert "現在のサムネイル" in edit_page.text
+
+
+def test_delete_item_via_detail_panel(client, tmp_path: Path) -> None:
+    test_client, db = client
+    fake_client = FakeDriveClient()
+
+    created = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Delete Me", shop_name="未設定"),
+        primary_upload=_make_upload(tmp_path, "item3.zip"),
+        drive_client=fake_client,
+    )
+    token = _meta_csrf_token(test_client.get("/items").text)
+
+    response = test_client.delete(f"/fragments/items/{created.id}", headers={"X-CSRF-Token": token})
+
+    assert response.status_code == 200
+    assert "商品を選択すると詳細が表示されます" in response.text
+
+    with pytest.raises(Exception):
+        item_service.get_item_detail(db, created.id)

@@ -268,6 +268,38 @@ def update_item(
     return _to_read(item)
 
 
+def delete_item(db: Session, item_id: int, *, drive_client: DriveClient | None = None) -> None:
+    """Deletes the DB row (cascades to files/license/history) unconditionally.
+
+    Drive file cleanup is best-effort: a failure here leaves an orphaned file
+    on Drive (recoverable via the settings integrity check / manual cleanup)
+    rather than blocking the user from removing the item from their library.
+    """
+    item = db.get(Item, item_id)
+    if item is None:
+        raise NotFoundError("Item", item_id)
+
+    file_ids = [f.drive_file_id for f in item.files]
+    if file_ids:
+        try:
+            if drive_client is None:
+                drive_client = oauth_service.make_drive_client(db)
+            for file_id in file_ids:
+                try:
+                    drive_client.delete_file(file_id)
+                except Exception:
+                    logger.warning(
+                        "failed to delete Drive file id=%s for item id=%s (non-fatal)", file_id, item_id, exc_info=True
+                    )
+        except Exception:
+            logger.warning("could not reach Drive to clean up files for item id=%s (non-fatal)", item_id, exc_info=True)
+
+    db.delete(item)
+    db.commit()
+    drive_sync_service.mark_dirty()
+    logger.info("item deleted id=%s", item_id)
+
+
 def add_update_check(db: Session, item_id: int, note: str | None) -> None:
     item = db.get(Item, item_id)
     if item is None:

@@ -363,3 +363,42 @@ def test_add_update_check_records_history_entry(app_db_session: Session, tmp_pat
 def test_add_update_check_raises_not_found_for_missing_item(app_db_session: Session) -> None:
     with pytest.raises(NotFoundError):
         item_service.add_update_check(app_db_session, 999, "note")
+
+
+def test_delete_item_removes_row_and_drive_files(app_db_session: Session, tmp_path: Path) -> None:
+    fake_client = FakeDriveClient()
+    upload = _make_upload(tmp_path)
+    thumb = _make_upload(tmp_path, name="thumb.png", content=b"\x89PNG\r\n", extension=".png")
+    created = item_service.create_item_with_file(
+        app_db_session, data=ItemCreate(name="Doomed", shop_name="Shop"), primary_upload=upload,
+        thumbnail_upload=thumb, drive_client=fake_client,
+    )
+    item = app_db_session.get(Item, created.id)
+    drive_file_ids = [f.drive_file_id for f in item.files]
+    assert len(drive_file_ids) == 2
+
+    item_service.delete_item(app_db_session, created.id, drive_client=fake_client)
+
+    assert app_db_session.get(Item, created.id) is None
+    for file_id in drive_file_ids:
+        assert file_id not in fake_client._files
+
+
+def test_delete_item_still_deletes_row_when_drive_cleanup_fails(app_db_session: Session, tmp_path: Path) -> None:
+    fake_client = FakeDriveClient()
+    upload = _make_upload(tmp_path)
+    created = item_service.create_item_with_file(
+        app_db_session, data=ItemCreate(name="Doomed 2", shop_name="Shop"), primary_upload=upload, drive_client=fake_client
+    )
+    item = app_db_session.get(Item, created.id)
+    # Remove the file from the fake Drive out-of-band so delete_file() fails.
+    del fake_client._files[item.files[0].drive_file_id]
+
+    item_service.delete_item(app_db_session, created.id, drive_client=fake_client)
+
+    assert app_db_session.get(Item, created.id) is None
+
+
+def test_delete_item_raises_not_found_for_missing_item(app_db_session: Session) -> None:
+    with pytest.raises(NotFoundError):
+        item_service.delete_item(app_db_session, 999)

@@ -10,7 +10,9 @@
   {% for item in items %}
   {% set placeholder_url, placeholder_text = placeholder_variants[item.id % 4] %}
   <div class="group rounded-3xl border border-white/60 dark:border-white/10 bg-white/75 dark:bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-slate-200/40 dark:shadow-black/20 overflow-hidden transition motion-safe:hover:shadow-xl motion-safe:hover:-translate-y-0.5">
-    <a href="/items/{{ item.id }}" class="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark rounded-t-3xl">
+    <a href="/items/{{ item.id }}"
+       hx-get="/items/{{ item.id }}" hx-target="#detail-panel" hx-swap="innerHTML" hx-push-url="true"
+       class="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark rounded-t-3xl">
       <div class="aspect-square flex items-center justify-center overflow-hidden {% if not item.has_thumbnail %}bg-[url('{{ placeholder_url }}')] bg-cover bg-center{% endif %}">
         {% if item.has_thumbnail %}
           <img src="/items/{{ item.id }}/thumbnail" alt="" class="w-full h-full object-cover">
@@ -21,7 +23,7 @@
         {% endif %}
       </div>
       <div class="p-4">
-        <div class="flex items-center gap-1 font-bold text-slate-900 dark:text-white truncate">
+        <div class="flex items-center gap-1 font-medium text-slate-900 dark:text-white truncate">
           {% if item.is_favorite %}<span class="icon text-amber-500 text-[1.1rem]" role="img" aria-label="お気に入り">star</span>{% endif %}
           <span class="truncate">{{ item.name }}</span>
         </div>

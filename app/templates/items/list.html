@@ -1,55 +1,84 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
-{% block title %}商品一覧 - BOOTH Asset Manager{% endblock %}
+{% block title %}一覧 - VRC Content Manager{% endblock %}
 {% block content %}
-{{ ui.page_title("商品一覧", icon="inventory_2") }}
+{{ ui.page_title("一覧", icon="inventory_2") }}
 
-{% set advanced_active = filters.shop_id or filters.status_code or filters.tags or filters.avatars or filters.favorites_only %}
-{% call ui.glass(extra="mb-6") %}
-<form id="filter-form" hx-get="/fragments/items" hx-target="#item-results" hx-trigger="change, submit" aria-label="商品検索・絞り込み">
-  <input type="hidden" name="view" id="view-input" value="{{ view }}">
-  <div class="flex flex-col sm:flex-row gap-4 sm:items-end">
-    {{ ui.text_field("q", "キーワード", value=filters.q, placeholder="商品名・メモ", extra="flex-1") }}
-    {{ ui.btn("検索", variant="primary", icon="search", type="submit") }}
-  </div>
+{% if upload_error %}{{ ui.alert(upload_error, variant="error") }}{% endif %}
 
-  <details class="group mt-4" {% if advanced_active %}open{% endif %}>
-    <summary class="inline-flex items-center gap-1.5 min-h-9 cursor-pointer select-none text-sm font-semibold text-accent dark:text-accent-dark rounded-lg px-1 -mx-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
-      <span class="icon text-[1.2rem] transition-transform motion-safe:group-open:rotate-180" aria-hidden="true">expand_more</span>
-      詳細フィルタ{% if advanced_active %}<span class="inline-flex items-center justify-center w-2 h-2 rounded-full bg-accent dark:bg-accent-dark" aria-hidden="true"></span><span class="sr-only">(絞り込み適用中)</span>{% endif %}
-    </summary>
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mt-4">
-      {{ ui.select_field("shop_id", "ショップ", [("", "すべて")] + shop_options, selected=filters.shop_id) }}
-      {{ ui.select_field("status_code", "ステータス", [("", "すべて")] + status_options, selected=filters.status_code) }}
-      {{ ui.text_field("tags", "タグ", value=filters.tags, placeholder="カンマ区切り", list_id="tag-list") }}
-      <datalist id="tag-list">{% for t in tag_names %}<option value="{{ t }}">{% endfor %}</datalist>
-      {{ ui.text_field("avatars", "対応アバター", value=filters.avatars, placeholder="カンマ区切り", list_id="avatar-list") }}
-      <datalist id="avatar-list">{% for a in avatar_names %}<option value="{{ a }}">{% endfor %}</datalist>
-      {{ ui.checkbox_field("favorites_only", "お気に入りのみ", checked=filters.favorites_only, extra="self-end") }}
+<div class="lg:grid lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-6 lg:items-start">
+  <div class="min-w-0">
+    {% set advanced_active = filters.shop_id or filters.status_code or filters.tags or filters.avatars or filters.favorites_only %}
+    {% call ui.glass(extra="mb-6") %}
+    <form id="filter-form" hx-get="/fragments/items" hx-target="#item-results" hx-trigger="change, submit" aria-label="商品検索・絞り込み">
+      <input type="hidden" name="view" id="view-input" value="{{ view }}">
+      <div class="flex flex-col sm:flex-row gap-4 sm:items-end">
+        {{ ui.text_field("q", "キーワード", value=filters.q, placeholder="商品名・メモ", extra="flex-1") }}
+        {{ ui.btn("検索", variant="primary", icon="search", type="submit") }}
+      </div>
+
+      <details class="group mt-4" {% if advanced_active %}open{% endif %}>
+        <summary class="inline-flex items-center gap-1.5 min-h-9 cursor-pointer select-none text-sm font-medium text-accent dark:text-accent-dark rounded-lg px-1 -mx-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+          <span class="icon text-[1.2rem] transition-transform motion-safe:group-open:rotate-180" aria-hidden="true">expand_more</span>
+          詳細フィルタ{% if advanced_active %}<span class="inline-flex items-center justify-center w-2 h-2 rounded-full bg-accent dark:bg-accent-dark" aria-hidden="true"></span><span class="sr-only">(絞り込み適用中)</span>{% endif %}
+        </summary>
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mt-4">
+          {{ ui.select_field("shop_id", "ショップ", [("", "すべて")] + shop_options, selected=filters.shop_id) }}
+          {{ ui.select_field("status_code", "ステータス", [("", "すべて")] + status_options, selected=filters.status_code) }}
+          {{ ui.text_field("tags", "タグ", value=filters.tags, placeholder="カンマ区切り", list_id="tag-list") }}
+          <datalist id="tag-list">{% for t in tag_names %}<option value="{{ t }}">{% endfor %}</datalist>
+          {{ ui.text_field("avatars", "対応アバター", value=filters.avatars, placeholder="カンマ区切り", list_id="avatar-list") }}
+          <datalist id="avatar-list">{% for a in avatar_names %}<option value="{{ a }}">{% endfor %}</datalist>
+          {{ ui.checkbox_field("favorites_only", "お気に入りのみ", checked=filters.favorites_only, extra="self-end") }}
+        </div>
+      </details>
+    </form>
+    {% endcall %}
+
+    <div class="flex items-center justify-between gap-3 mb-4">
+      <div>
+        <input id="f-quick-upload" type="file" name="file" accept="{{ accept_extensions }}" class="sr-only">
+        <label for="f-quick-upload" title="対応形式: {{ allowed_extensions }} / 上限{{ max_upload_size_mb }}MB"
+               class="inline-flex items-center gap-1.5 min-h-9 px-4 rounded-full text-sm font-semibold bg-accent dark:bg-accent-dark text-white dark:text-slate-950 shadow-md shadow-accent/30 hover:brightness-95 transition cursor-pointer focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent dark:focus-within:outline-accent-dark">
+          <span class="icon text-[1.1rem]" aria-hidden="true">upload_file</span>アップロード
+        </label>
+      </div>
+      <div class="inline-flex rounded-full border border-white/60 dark:border-white/10 bg-white/60 dark:bg-white/5 backdrop-blur p-1" role="group" aria-label="表示形式">
+        <button type="button" id="view-card-btn" aria-pressed="{{ 'true' if view != 'table' else 'false' }}"
+                class="js-view-btn inline-flex items-center gap-1.5 min-h-9 px-4 rounded-full text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+          <span class="icon text-[1.1rem]" aria-hidden="true">grid_view</span>カード
+        </button>
+        <button type="button" id="view-table-btn" aria-pressed="{{ 'true' if view == 'table' else 'false' }}"
+                class="js-view-btn inline-flex items-center gap-1.5 min-h-9 px-4 rounded-full text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+          <span class="icon text-[1.1rem]" aria-hidden="true">table_rows</span>テーブル
+        </button>
+      </div>
     </div>
-  </details>
-</form>
-{% endcall %}
 
-<div class="flex justify-end mb-4">
-  <div class="inline-flex rounded-full border border-white/60 dark:border-white/10 bg-white/60 dark:bg-white/5 backdrop-blur p-1" role="group" aria-label="表示形式">
-    <button type="button" id="view-card-btn" aria-pressed="{{ 'true' if view != 'table' else 'false' }}"
-            class="js-view-btn inline-flex items-center gap-1.5 min-h-9 px-4 rounded-full text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
-      <span class="icon text-[1.1rem]" aria-hidden="true">grid_view</span>カード
-    </button>
-    <button type="button" id="view-table-btn" aria-pressed="{{ 'true' if view == 'table' else 'false' }}"
-            class="js-view-btn inline-flex items-center gap-1.5 min-h-9 px-4 rounded-full text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
-      <span class="icon text-[1.1rem]" aria-hidden="true">table_rows</span>テーブル
-    </button>
+    <div id="item-results" aria-live="polite">
+      {% if view == "table" %}
+        {% include "items/_results_table.html" %}
+      {% else %}
+        {% include "items/_results_card.html" %}
+      {% endif %}
+    </div>
   </div>
+
+  <aside id="detail-panel" class="mt-6 lg:mt-0 lg:sticky lg:top-20" aria-live="polite">
+    {% if selected_item %}
+      {% set item = selected_item %}
+      {% include "items/_detail_panel.html" %}
+    {% else %}
+      {% include "items/_detail_empty.html" %}
+    {% endif %}
+  </aside>
 </div>
 
-<div id="item-results" aria-live="polite">
-  {% if view == "table" %}
-    {% include "items/_results_table.html" %}
-  {% else %}
-    {% include "items/_results_card.html" %}
-  {% endif %}
+<div id="drop-overlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-accent/20 dark:bg-accent-dark/20 backdrop-blur-sm pointer-events-none">
+  <div class="rounded-3xl border-2 border-dashed border-accent dark:border-accent-dark bg-white/80 dark:bg-slate-900/80 px-10 py-8 text-center">
+    <span class="icon text-4xl text-accent dark:text-accent-dark" aria-hidden="true">upload_file</span>
+    <p class="text-sm font-medium text-slate-700 dark:text-slate-200 mt-2">ドロップしてアップロード</p>
+  </div>
 </div>
 
 <script>
@@ -88,6 +117,65 @@
   if (saved && saved !== viewInput.value) {
     setView(saved);
   }
+
+  document.getElementById("detail-panel").addEventListener("click", function (e) {
+    if (e.target.closest(".js-close-detail")) {
+      window.location.href = "/items";
+    }
+  });
+})();
+
+(function () {
+  // Google Drive-style whole-page upload: click the toolbar button (native
+  // file input, always keyboard/screen-reader operable) or drop a file
+  // anywhere on the page. Both paths post to the same /items/new endpoint
+  // the dedicated (now-removed) ingest page used to use.
+  var input = document.getElementById("f-quick-upload");
+  var overlay = document.getElementById("drop-overlay");
+  var csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+  var dragCounter = 0;
+
+  function upload(file) {
+    var body = new FormData();
+    body.append("file", file);
+    fetch("/items/new", {
+      method: "POST",
+      body: body,
+      headers: { "X-CSRF-Token": csrfToken },
+    }).then(function (response) {
+      if (response.redirected || response.ok) {
+        window.location.href = response.url;
+      }
+    });
+  }
+
+  input.addEventListener("change", function () {
+    if (input.files && input.files.length) upload(input.files[0]);
+  });
+
+  window.addEventListener("dragenter", function (e) {
+    if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") === -1) return;
+    dragCounter++;
+    overlay.classList.remove("hidden");
+    overlay.classList.add("flex");
+  });
+  window.addEventListener("dragover", function (e) { e.preventDefault(); });
+  window.addEventListener("dragleave", function () {
+    dragCounter = Math.max(0, dragCounter - 1);
+    if (dragCounter === 0) {
+      overlay.classList.add("hidden");
+      overlay.classList.remove("flex");
+    }
+  });
+  window.addEventListener("drop", function (e) {
+    e.preventDefault();
+    dragCounter = 0;
+    overlay.classList.add("hidden");
+    overlay.classList.remove("flex");
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      upload(e.dataTransfer.files[0]);
+    }
+  });
 })();
 </script>
 {% endblock %}

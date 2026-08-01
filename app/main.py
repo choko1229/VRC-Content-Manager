@@ -23,6 +23,7 @@ from app.web.fragments import items as items_fragments
 from app.web.fragments import settings as settings_fragments
 from app.web.fragments import shops as shops_fragments
 from app.web.pages import auth as auth_pages
+from app.web.pages import avatars as avatars_pages
 from app.web.pages import items as items_pages
 from app.web.pages import settings as settings_pages
 from app.web.pages import shops as shops_pages
@@ -79,7 +80,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
 
-    app = FastAPI(title="BOOTH Asset Manager", lifespan=lifespan)
+    app = FastAPI(title="VRC Content Manager", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     register_exception_handlers(app)
 
@@ -123,6 +124,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_pages.router)
     app.include_router(shops_pages.router)
     app.include_router(shops_fragments.router)
+    app.include_router(avatars_pages.router)
     app.include_router(items_pages.router)
     app.include_router(items_fragments.router)
     app.include_router(settings_pages.router)

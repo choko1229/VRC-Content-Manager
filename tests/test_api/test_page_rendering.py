@@ -34,11 +34,20 @@ def page_client(app_db_session: Session):
         app.dependency_overrides.pop(get_db, None)
 
 
-def test_items_new_page_renders(page_client: TestClient) -> None:
-    response = page_client.get("/items/new")
+def test_items_new_page_redirects_to_items(page_client: TestClient) -> None:
+    # /items/new was folded into the TOP (/items) page's upload button +
+    # whole-page drag-and-drop; the route survives only as a redirect for
+    # old bookmarks/links.
+    response = page_client.get("/items/new", follow_redirects=False)
+
+    assert response.status_code in (302, 307)
+    assert response.headers["location"] == "/items"
+
+
+def test_avatars_page_renders(page_client: TestClient) -> None:
+    response = page_client.get("/avatars")
 
     assert response.status_code == 200
-    assert 'name="csrf_token"' in response.text
 
 
 def test_items_list_page_renders_both_views(page_client: TestClient) -> None:
@@ -47,10 +56,19 @@ def test_items_list_page_renders_both_views(page_client: TestClient) -> None:
         assert response.status_code == 200
 
 
-def test_shops_page_renders(page_client: TestClient) -> None:
-    response = page_client.get("/shops")
+def test_shops_page_redirects_to_settings(page_client: TestClient) -> None:
+    # Shop management was folded into the 設定 page's "ショップ管理" section.
+    response = page_client.get("/shops", follow_redirects=False)
+
+    assert response.status_code in (302, 307)
+    assert response.headers["location"] == "/settings"
+
+
+def test_settings_page_includes_shop_management(page_client: TestClient) -> None:
+    response = page_client.get("/settings")
 
     assert response.status_code == 200
+    assert "ショップ管理" in response.text
 
 
 def _create_item(db: Session, tmp_path: Path) -> int:
@@ -73,6 +91,20 @@ def test_item_detail_page_renders(page_client: TestClient, app_db_session: Sessi
 
     assert response.status_code == 200
     assert "Render Check Item" in response.text
+    assert 'id="detail-panel"' in response.text  # full shell, not just the fragment
+
+
+def test_item_detail_htmx_request_returns_fragment_only(
+    page_client: TestClient, app_db_session: Session, tmp_path: Path
+) -> None:
+    item_id = _create_item(app_db_session, tmp_path)
+
+    response = page_client.get(f"/items/{item_id}", headers={"HX-Request": "true"})
+
+    assert response.status_code == 200
+    assert "Render Check Item" in response.text
+    assert 'id="detail-panel"' not in response.text  # just the panel's inner content
+    assert 'id="main-content"' not in response.text  # not the full page shell
 
 
 def test_item_edit_page_renders(page_client: TestClient, app_db_session: Session, tmp_path: Path) -> None:

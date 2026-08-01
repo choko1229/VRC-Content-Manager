@@ -20,7 +20,11 @@
       {% for item in items %}
       <tr class="hover:bg-white/50 dark:hover:bg-white/5 transition">
         <td class="px-4 py-3">{% if item.is_favorite %}<span class="icon text-amber-500" role="img" aria-label="お気に入り">star</span>{% endif %}</td>
-        <td class="px-4 py-3 font-medium"><a href="/items/{{ item.id }}" class="text-accent dark:text-accent-dark hover:underline">{{ item.name }}</a></td>
+        <td class="px-4 py-3 font-medium">
+          <a href="/items/{{ item.id }}"
+             hx-get="/items/{{ item.id }}" hx-target="#detail-panel" hx-swap="innerHTML" hx-push-url="true"
+             class="text-accent dark:text-accent-dark hover:underline">{{ item.name }}</a>
+        </td>
         <td class="px-4 py-3">{{ item.shop_name or "" }}</td>
         <td class="px-4 py-3">{{ item.status_label or "" }}</td>
         <td class="px-4 py-3">{{ item.file_format or "" }}</td>

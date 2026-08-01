@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
-{% block title %}商品編集 - BOOTH Asset Manager{% endblock %}
+{% block title %}商品編集 - VRC Content Manager{% endblock %}
 {% block content %}
 <p class="mb-4"><a href="/items/{{ item_id }}" class="inline-flex items-center gap-1 text-sm font-semibold text-accent dark:text-accent-dark hover:underline"><span class="icon text-[1.1rem]" aria-hidden="true">arrow_back</span>詳細に戻る</a></p>
 
@@ -13,7 +13,7 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 
   {% call ui.glass() %}
-  <h2 class="text-lg font-bold mb-4">基本情報</h2>
+  <h2 class="text-lg font-medium mb-4">基本情報</h2>
   <div class="grid gap-4 sm:grid-cols-2">
     {{ ui.text_field("name", "商品名", required=True, value=form_values.get('name', '')) }}
     {{ ui.text_field("shop_name", "ショップ名", required=True, value=form_values.get('shop_name', ''), list_id="shop-list") }}
@@ -31,7 +31,7 @@
   {% endcall %}
 
   {% call ui.glass() %}
-  <h2 class="text-lg font-bold mb-4">サムネイル画像</h2>
+  <h2 class="text-lg font-medium mb-4">サムネイル画像</h2>
   {% if has_thumbnail %}
   <div class="flex items-center gap-3 mb-4">
     <img src="/items/{{ item_id }}/thumbnail" alt="現在のサムネイル" class="w-16 h-16 rounded-xl object-cover border border-white/60 dark:border-white/10 shrink-0">
@@ -48,7 +48,7 @@
   {% endcall %}
 
   {% call ui.glass() %}
-  <h2 class="text-lg font-bold mb-4">購入情報</h2>
+  <h2 class="text-lg font-medium mb-4">購入情報</h2>
   <div class="grid gap-4 sm:grid-cols-2">
     {{ ui.text_field("purchase_date", "購入日", type="date", value=form_values.get('purchase_date', '')) }}
     {{ ui.text_field("download_date", "ダウンロード日", type="date", value=form_values.get('download_date', '')) }}
@@ -58,7 +58,7 @@
   {% endcall %}
 
   {% call ui.glass() %}
-  <h2 class="text-lg font-bold mb-4">分類</h2>
+  <h2 class="text-lg font-medium mb-4">分類</h2>
   <div class="grid gap-4 sm:grid-cols-2 mb-3">
     {{ ui.text_field("tags", "タグ(カンマ区切り)", value=form_values.get('tags', ''), list_id="tag-list") }}
     <datalist id="tag-list">{% for t in tag_names %}<option value="{{ t }}">{% endfor %}</datalist>
@@ -69,7 +69,7 @@
   {% endcall %}
 
   {% call ui.glass() %}
-  <h2 class="text-lg font-bold mb-4">ライセンス</h2>
+  <h2 class="text-lg font-medium mb-4">ライセンス</h2>
   <div class="grid gap-4 sm:grid-cols-2 mb-4">
     {{ ui.select_field("commercial_use", "商用利用", [("unknown", "不明"), ("yes", "可"), ("no", "不可")], selected=form_values.get('commercial_use', 'unknown')) }}
     {{ ui.select_field("modification_allowed", "改変", [("unknown", "不明"), ("yes", "可"), ("no", "不可")], selected=form_values.get('modification_allowed', 'unknown')) }}
@@ -80,7 +80,7 @@
   {% endcall %}
 
   {% call ui.glass() %}
-  <h2 class="text-lg font-bold mb-4">メモ</h2>
+  <h2 class="text-lg font-medium mb-4">メモ</h2>
   {{ ui.textarea_field("memo", "メモ", value=form_values.get('memo', ''), rows=3) }}
   {% endcall %}
 

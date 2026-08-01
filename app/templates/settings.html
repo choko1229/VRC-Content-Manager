@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
-{% block title %}設定 - BOOTH Asset Manager{% endblock %}
+{% block title %}設定 - VRC Content Manager{% endblock %}
 {% block content %}
 {{ ui.page_title("設定", icon="settings") }}
 
 {% call ui.glass(extra="mb-6") %}
-<h2 class="text-lg font-bold mb-3">Google Drive連携</h2>
+<h2 class="text-lg font-medium mb-3">Google Drive連携</h2>
 {% if connected %}
   {{ ui.alert(("接続済み" ~ (" (未同期の変更あり)" if is_dirty else "")), variant="success" if not is_dirty else "error") }}
   <p class="text-sm text-slate-500 dark:text-slate-400">Drive上のデータベースファイルID: {{ drive_db_file_id or "-" }}</p>
@@ -28,7 +28,7 @@
 
 {% if connected %}
 {% call ui.glass(extra="mb-6") %}
-<h2 class="text-lg font-bold mb-3">整合性チェック</h2>
+<h2 class="text-lg font-medium mb-3">整合性チェック</h2>
 <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">登録済みファイルがDrive上で実際に見つかるかを確認します(取り込み失敗時の補償削除が失敗していた場合などに検出できます)。</p>
 <div id="integrity-check-result" aria-live="polite"></div>
 {{ ui.btn("チェック実行", variant="secondary", icon="fact_check", type="button", attrs='hx-post="/fragments/settings/integrity-check" hx-target="#integrity-check-result" hx-swap="innerHTML"') }}
@@ -36,7 +36,22 @@
 {% endif %}
 
 {% call ui.glass(extra="mb-6") %}
-<h2 class="text-lg font-bold mb-4">Google OAuthクライアント</h2>
+<h2 class="text-lg font-medium mb-4">ショップ管理</h2>
+<form class="grid gap-4 sm:grid-cols-3 sm:items-end mb-5" hx-post="/fragments/shops" hx-target="#shop-list" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()" aria-label="ショップ追加フォーム">
+  {{ ui.text_field("name", "ショップ名", required=True) }}
+  {{ ui.text_field("url", "ショップURL", type="url") }}
+  {{ ui.text_field("memo", "メモ") }}
+  <div class="sm:col-span-3">
+    {{ ui.btn("追加", variant="secondary", icon="add") }}
+  </div>
+</form>
+<div id="shop-list">
+  {% include "shops/_table.html" %}
+</div>
+{% endcall %}
+
+{% call ui.glass(extra="mb-6") %}
+<h2 class="text-lg font-medium mb-4">Google OAuthクライアント</h2>
 {% if oauth_error %}{{ ui.alert(oauth_error, variant="error") }}{% endif %}
 <form method="post" action="/settings/oauth-credentials" class="space-y-4">
   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
@@ -50,7 +65,7 @@
 {% endcall %}
 
 {% call ui.glass(extra="mb-6") %}
-<h2 class="text-lg font-bold mb-4">ログインパスワード</h2>
+<h2 class="text-lg font-medium mb-4">ログインパスワード</h2>
 {% if password_error %}{{ ui.alert(password_error, variant="error") }}{% endif %}
 <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">現在の状態: {% if app_login_password_set %}設定済み{% else %}未設定{% endif %}</p>
 <form method="post" action="/settings/login-password" class="space-y-4">
@@ -61,7 +76,7 @@
 {% endcall %}
 
 {% call ui.glass() %}
-<h2 class="text-lg font-bold mb-4">動作設定</h2>
+<h2 class="text-lg font-medium mb-4">動作設定</h2>
 {% if operational_error %}{{ ui.alert(operational_error, variant="error") }}{% endif %}
 <form method="post" action="/settings/operational" class="space-y-4">
   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
