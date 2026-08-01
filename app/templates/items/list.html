@@ -37,7 +37,7 @@
 
     <div class="flex items-center justify-between gap-3 mb-4">
       <div>
-        <input id="f-quick-upload" type="file" name="file" accept="{{ accept_extensions }}" class="sr-only">
+        <input id="f-quick-upload" type="file" name="file" accept="{{ accept_extensions }}" multiple class="sr-only">
         <label for="f-quick-upload" title="対応形式: {{ allowed_extensions }} / 上限{{ max_upload_size_mb }}MB"
                class="inline-flex items-center gap-1.5 min-h-9 px-4 rounded-full text-sm font-semibold bg-accent dark:bg-accent-dark text-white dark:text-slate-950 shadow-md shadow-accent/30 hover:brightness-95 transition cursor-pointer focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent dark:focus-within:outline-accent-dark">
           <span class="icon text-[1.1rem]" aria-hidden="true">upload_file</span>アップロード
@@ -127,13 +127,21 @@
 
 (function () {
   // Google Drive-style whole-page upload: click the toolbar button (native
-  // file input, always keyboard/screen-reader operable) or drop a file
-  // anywhere on the page. Both paths post to the same /items/new endpoint
-  // the dedicated (now-removed) ingest page used to use.
+  // file input, always keyboard/screen-reader operable, supports selecting
+  // several files at once) or drop one or more files anywhere on the page.
+  // Each file uploads independently (its own progress toast) and, on
+  // success, the list refreshes in place via htmx -- no page navigation,
+  // so uploading several files lets you watch them all land live and then
+  // click into each to fill in details.
   var input = document.getElementById("f-quick-upload");
   var overlay = document.getElementById("drop-overlay");
   var csrfToken = document.querySelector('meta[name="csrf-token"]').content;
   var dragCounter = 0;
+
+  function refreshResultsList() {
+    var form = document.getElementById("filter-form");
+    if (form) htmx.trigger(form, "submit");
+  }
 
   function upload(file) {
     var toastId = window.Toast.show({
@@ -176,12 +184,12 @@
       }
       window.Toast.update(toastId, {
         title: "アップロード完了",
-        message: file.name,
+        message: file.name + " を一覧に追加しました",
         variant: "success",
         progress: 100,
-        duration: 1500,
+        duration: 3000,
       });
-      window.location.href = xhr.responseURL;
+      refreshResultsList();
     });
 
     xhr.addEventListener("error", function () {
@@ -198,8 +206,13 @@
     xhr.send(body);
   }
 
+  function uploadAll(files) {
+    Array.prototype.forEach.call(files, upload);
+  }
+
   input.addEventListener("change", function () {
-    if (input.files && input.files.length) upload(input.files[0]);
+    if (input.files && input.files.length) uploadAll(input.files);
+    input.value = "";
   });
 
   window.addEventListener("dragenter", function (e) {
@@ -222,7 +235,7 @@
     overlay.classList.add("hidden");
     overlay.classList.remove("flex");
     if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
-      upload(e.dataTransfer.files[0]);
+      uploadAll(e.dataTransfer.files);
     }
   });
 })();
