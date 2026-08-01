@@ -10,7 +10,7 @@ from app.core.csrf import verify_csrf
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.schemas.item import ItemSearchFilters
-from app.services import booth_info_service, item_service
+from app.services import avatar_service, booth_info_service, item_service, tag_service
 from app.web.templating import templates
 
 router = APIRouter(prefix="/fragments/items")
@@ -21,15 +21,37 @@ def _split_csv(raw: str) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
+_EMPTY_FETCH_INFO_CONTEXT = {"info": None, "error": None, "suggested_tags": [], "suggested_avatars": []}
+
+
 @router.get("/fetch-info")
-async def fetch_info_fragment(request: Request, product_url: str = ""):
+async def fetch_info_fragment(request: Request, product_url: str = "", db: Session = Depends(get_db)):
     product_url = product_url.strip()
     if not product_url:
-        return templates.TemplateResponse(request, "items/_fetch_info_result.html", {"info": None, "error": None})
+        return templates.TemplateResponse(request, "items/_fetch_info_result.html", _EMPTY_FETCH_INFO_CONTEXT)
 
     info = await run_in_threadpool(booth_info_service.try_fetch_product_info, product_url)
-    error = None if info is not None else "商品情報を自動取得できませんでした。お手数ですが手動で入力してください。"
-    return templates.TemplateResponse(request, "items/_fetch_info_result.html", {"info": info, "error": error})
+    if info is None:
+        return templates.TemplateResponse(
+            request,
+            "items/_fetch_info_result.html",
+            {**_EMPTY_FETCH_INFO_CONTEXT, "error": "商品情報を自動取得できませんでした。お手数ですが手動で入力してください。"},
+        )
+
+    suggested_tags = booth_info_service.match_known_terms(tag_service.list_tag_names(db), info.name, info.description)
+    suggested_avatars = booth_info_service.match_known_terms(
+        avatar_service.list_avatar_names(db), info.name, info.description
+    )
+    return templates.TemplateResponse(
+        request,
+        "items/_fetch_info_result.html",
+        {
+            "info": info,
+            "error": None,
+            "suggested_tags": suggested_tags[:10],
+            "suggested_avatars": suggested_avatars[:10],
+        },
+    )
 
 
 @router.get("")

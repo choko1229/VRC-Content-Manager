@@ -13,6 +13,7 @@ HTML_WITH_JSON_LD = """
 <meta property="og:image" content="https://booth.pximg.net/thumb.jpg">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"Product","name":"やさしいくま【VRChat想定3Dアバター】",
+"description":"VRChat想定のHumanoid対応オリジナル3Dアバターです。マヌカ、桔梗に対応。",
 "offers":{"priceCurrency":"JPY","@type":"Offer","price":"300"},
 "brand":{"@type":"Brand","name":"SheepySnow","url":"https://watayukihii.booth.pm/"},
 "image":"https://booth.pximg.net/thumb.jpg"}
@@ -22,7 +23,8 @@ HTML_WITH_JSON_LD = """
 
 HTML_WITH_OG_TITLE_ONLY = (
     '<html><head><meta property="og:title" content="くまさん - SheepySnow - BOOTH">'
-    '<meta property="og:image" content="https://booth.pximg.net/thumb2.jpg"></head></html>'
+    '<meta property="og:image" content="https://booth.pximg.net/thumb2.jpg">'
+    '<meta property="og:description" content="やさしい質感のテディベアです。"></head></html>'
 )
 
 HTML_WITHOUT_METADATA = "<html><head></head></html>"
@@ -50,6 +52,7 @@ def test_try_fetch_product_info_prefers_json_ld(monkeypatch: pytest.MonkeyPatch)
     assert result.shop_url == "https://watayukihii.booth.pm/"
     assert result.price == 300
     assert result.image_url == "https://booth.pximg.net/thumb.jpg"
+    assert result.description == "VRChat想定のHumanoid対応オリジナル3Dアバターです。マヌカ、桔梗に対応。"
 
 
 def test_try_fetch_product_info_falls_back_to_meta_tags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -65,6 +68,7 @@ def test_try_fetch_product_info_falls_back_to_meta_tags(monkeypatch: pytest.Monk
     assert result.shop_name == "SheepySnow"
     assert result.price is None
     assert result.image_url == "https://booth.pximg.net/thumb2.jpg"
+    assert result.description == "やさしい質感のテディベアです。"
 
 
 def test_try_fetch_product_info_returns_none_without_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -119,3 +123,21 @@ def test_try_fetch_product_info_ignores_malformed_json_ld(monkeypatch: pytest.Mo
 
     assert result is not None
     assert result.name == "くまさん"
+
+
+def test_match_known_terms_finds_case_insensitive_substring_matches() -> None:
+    known = ["VRChat想定", "マヌカ", "桔梗", "未使用タグ"]
+
+    matches = booth_info_service.match_known_terms(
+        known, "やさしいくま【vrchat想定3Dアバター】", "マヌカ、桔梗に対応。"
+    )
+
+    assert matches == ["VRChat想定", "マヌカ", "桔梗"]
+
+
+def test_match_known_terms_returns_empty_for_no_text() -> None:
+    assert booth_info_service.match_known_terms(["タグ"], None, None) == []
+
+
+def test_match_known_terms_returns_empty_when_nothing_matches() -> None:
+    assert booth_info_service.match_known_terms(["無関係タグ"], "やさしいくま", "説明文") == []

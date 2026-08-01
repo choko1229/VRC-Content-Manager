@@ -33,6 +33,7 @@ class BoothProductInfo:
     shop_url: str | None
     price: int | None
     image_url: str | None
+    description: str | None
 
 
 def _from_json_ld(soup: BeautifulSoup) -> BoothProductInfo | None:
@@ -54,12 +55,14 @@ def _from_json_ld(soup: BeautifulSoup) -> BoothProductInfo | None:
             except (TypeError, ValueError):
                 price = None
 
+        description = data.get("description")
         return BoothProductInfo(
             name=data.get("name") or None,
             shop_name=brand.get("name") if isinstance(brand, dict) else None,
             shop_url=brand.get("url") if isinstance(brand, dict) else None,
             price=price,
             image_url=data.get("image") or None,
+            description=description.strip() if isinstance(description, str) and description.strip() else None,
         )
     return None
 
@@ -67,6 +70,7 @@ def _from_json_ld(soup: BeautifulSoup) -> BoothProductInfo | None:
 def _from_meta_tags(soup: BeautifulSoup) -> BoothProductInfo | None:
     og_title = soup.find("meta", attrs={"property": "og:title"})
     og_image = soup.find("meta", attrs={"property": "og:image"})
+    og_description = soup.find("meta", attrs={"property": "og:description"})
     title = (og_title.get("content") if og_title else None) or None
     if not title:
         return None
@@ -77,12 +81,14 @@ def _from_meta_tags(soup: BeautifulSoup) -> BoothProductInfo | None:
     if len(parts) == 3 and parts[2] == "BOOTH":
         name, shop_name = parts[0], parts[1]
 
+    description = og_description.get("content") if og_description else None
     return BoothProductInfo(
         name=name or None,
         shop_name=shop_name,
         shop_url=None,
         price=None,
         image_url=(og_image.get("content") if og_image else None) or None,
+        description=description.strip() if isinstance(description, str) and description.strip() else None,
     )
 
 
@@ -94,6 +100,19 @@ def _fetch(client: httpx.Client, product_url: str) -> BoothProductInfo | None:
 
     soup = BeautifulSoup(response.text, "html.parser")
     return _from_json_ld(soup) or _from_meta_tags(soup)
+
+
+def match_known_terms(known: list[str], *texts: str | None) -> list[str]:
+    """Suggest already-known tag/avatar names that show up in the fetched name/description.
+
+    Deliberately conservative: only ever resurfaces terms the user has already
+    used before (never invents new ones), so a suggestion is always something
+    they'd recognize -- the user still has to click to accept it.
+    """
+    haystack = " ".join(t for t in texts if t).lower()
+    if not haystack:
+        return []
+    return [term for term in known if term and term.lower() in haystack]
 
 
 def try_fetch_product_info(product_url: str | None, *, client: httpx.Client | None = None) -> BoothProductInfo | None:

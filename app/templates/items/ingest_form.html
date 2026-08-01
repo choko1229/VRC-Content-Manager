@@ -18,7 +18,7 @@
     <datalist id="shop-list">{% for s in shops %}<option value="{{ s }}">{% endfor %}</datalist>
     {{ ui.text_field("shop_url", "ショップURL", type="url", value=form_values.get('shop_url', '')) }}
     {{ ui.text_field("product_url", "商品ページURL", type="url", value=form_values.get('product_url', ''),
-        help_text="BOOTHの商品ページURLを貼り付けると、商品名・ショップ名・価格を自動取得します(取得後も修正できます)。",
+        help_text="BOOTHの商品ページURLを貼り付けると、商品名・ショップ名・価格・説明文を自動取得します(取得後も修正できます)。タグ・対応アバターは候補として表示されます。",
         attrs='hx-get="/fragments/items/fetch-info" hx-trigger="change" hx-target="#fetch-info-result" hx-swap="innerHTML" hx-include="this" hx-indicator="#fetch-info-indicator"') }}
     {{ ui.text_field("download_source_url", "ダウンロード元URL", type="url", value=form_values.get('download_source_url', ''), extra="sm:col-span-2") }}
   </div>
@@ -132,6 +132,23 @@
 
   setupDropzone("dropzone-file", "f-file");
   setupDropzone("dropzone-thumbnail", "f-thumbnail");
+
+  // BOOTH auto-fetch suggestion chips (タグ/対応アバター候補) are inserted via
+  // htmx OOB swap, so listen on a stable ancestor rather than binding per-chip.
+  document.addEventListener("click", function (e) {
+    var chip = e.target.closest(".js-suggestion-chip");
+    if (!chip) return;
+    var field = document.getElementById(chip.dataset.suggestField);
+    if (!field) return;
+    var value = chip.dataset.suggestValue;
+    var current = field.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    var alreadyPresent = current.some(function (v) { return v.toLowerCase() === value.toLowerCase(); });
+    if (!alreadyPresent) {
+      current.push(value);
+      field.value = current.join(", ");
+    }
+    chip.disabled = true;
+  });
 })();
 </script>
 {% endblock %}

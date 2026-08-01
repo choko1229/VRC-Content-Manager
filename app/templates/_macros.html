@@ -56,6 +56,11 @@
        hx-swap-oob="true" class="{{ input_classes }}">
 {% endmacro %}
 
+{% macro oob_textarea_value(field_id, name, value, rows=3) %}
+{# Textarea counterpart to oob_field_value -- see there for why this exists. #}
+<textarea id="{{ field_id }}" name="{{ name }}" rows="{{ rows }}" hx-swap-oob="true" class="{{ input_classes }}">{{ value }}</textarea>
+{% endmacro %}
+
 {% macro textarea_field(name, label, value="", rows=3, help_text=none, extra="") %}
 {% set field_id = "f-" + name %}
 <div class="{{ extra }}">
@@ -102,6 +107,17 @@
 
 {% macro chip(text) %}
 <span class="inline-flex items-center rounded-full bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/15 px-3 py-0.5 text-xs text-slate-700 dark:text-slate-200 backdrop-blur">{{ text }}</span>
+{% endmacro %}
+
+{% macro suggestion_chip(field_id, value) %}
+{# Clickable "add this" suggestion, e.g. a known tag/avatar matched from fetched
+   BOOTH text. Uses data-attributes (not inline JS) so the value never needs to
+   be interpolated into a script context -- see ingest_form.html's delegated
+   click handler. #}
+<button type="button" data-suggest-field="{{ field_id }}" data-suggest-value="{{ value }}"
+        class="js-suggestion-chip inline-flex items-center gap-1 rounded-full bg-accent/10 dark:bg-accent-dark/10 border border-accent/30 dark:border-accent-dark/30 min-h-7 px-3 py-0.5 text-xs font-semibold text-accent dark:text-accent-dark transition hover:bg-accent/20 dark:hover:bg-accent-dark/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark disabled:opacity-50 disabled:pointer-events-none">
+  <span class="icon text-[0.9rem]" aria-hidden="true">add</span>{{ value }}
+</button>
 {% endmacro %}
 
 {% macro page_title(text, icon=none) %}
