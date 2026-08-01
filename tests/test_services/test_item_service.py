@@ -12,7 +12,7 @@ from app.models.item import Item
 from app.models.item_file import FileRole
 from app.models.license import TriState
 from app.schemas.item import ItemCreate, ItemSearchFilters, ItemUpdate
-from app.services import drive_sync_service, item_service, shop_service
+from app.services import drive_sync_service, item_service, shop_service, thumbnail_service
 from app.services.upload_service import ValidatedUpload
 
 
@@ -236,6 +236,116 @@ def test_update_item_changes_metadata_and_associations(app_db_session: Session, 
 def test_update_item_raises_not_found_for_missing_item(app_db_session: Session) -> None:
     with pytest.raises(NotFoundError):
         item_service.update_item(app_db_session, 999, ItemUpdate(name="X", shop_name="Y"))
+
+
+def test_update_item_attaches_explicit_thumbnail_upload(app_db_session: Session, tmp_path: Path) -> None:
+    created = _create_item(app_db_session, tmp_path, name="No Thumb Yet")
+    fake_client = FakeDriveClient()
+    thumbnail = _make_upload(tmp_path, name="thumb.png", content=b"\x89PNG\r\n", extension=".png")
+
+    updated = item_service.update_item(
+        app_db_session,
+        created.id,
+        ItemUpdate(name="No Thumb Yet", shop_name="Shop"),
+        thumbnail_upload=thumbnail,
+        drive_client=fake_client,
+    )
+
+    assert updated.has_thumbnail is True
+    item = app_db_session.get(Item, created.id)
+    assert item.thumbnail_file is not None
+    assert item.thumbnail_file.drive_folder_id == item.primary_file.drive_folder_id
+
+
+def test_update_item_replaces_existing_thumbnail_and_deletes_old_drive_file(
+    app_db_session: Session, tmp_path: Path
+) -> None:
+    fake_client = FakeDriveClient()
+    upload = _make_upload(tmp_path)
+    first_thumb = _make_upload(tmp_path, name="old.png", content=b"\x89PNG\r\n", extension=".png")
+    data = ItemCreate(name="Has Thumb", shop_name="Shop")
+    created = item_service.create_item_with_file(
+        app_db_session, data=data, primary_upload=upload, thumbnail_upload=first_thumb, drive_client=fake_client
+    )
+    old_drive_file_id = app_db_session.get(Item, created.id).thumbnail_file.drive_file_id
+
+    new_thumb = _make_upload(tmp_path, name="new.png", content=b"\x89PNG\r\n", extension=".png")
+    item_service.update_item(
+        app_db_session,
+        created.id,
+        ItemUpdate(name="Has Thumb", shop_name="Shop"),
+        thumbnail_upload=new_thumb,
+        drive_client=fake_client,
+    )
+
+    item = app_db_session.get(Item, created.id)
+    assert item.thumbnail_file.original_filename == "new.png"
+    assert old_drive_file_id not in fake_client._files
+
+
+def test_update_item_auto_fetches_thumbnail_from_product_url_when_none_exists(
+    app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = _create_item(app_db_session, tmp_path, name="Fetch Me")
+    fake_client = FakeDriveClient()
+
+    fetched = thumbnail_service.FetchedThumbnail(content=b"\x89PNG\r\n", content_type="image/png")
+    monkeypatch.setattr(thumbnail_service, "try_fetch_thumbnail", lambda url: fetched)
+
+    updated = item_service.update_item(
+        app_db_session,
+        created.id,
+        ItemUpdate(name="Fetch Me", shop_name="Shop", product_url="https://booth.example/items/1"),
+        drive_client=fake_client,
+    )
+
+    assert updated.has_thumbnail is True
+
+
+def test_update_item_does_not_overwrite_existing_thumbnail_via_auto_fetch(
+    app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_client = FakeDriveClient()
+    upload = _make_upload(tmp_path)
+    thumb = _make_upload(tmp_path, name="keep.png", content=b"\x89PNG\r\n", extension=".png")
+    data = ItemCreate(name="Already Has One", shop_name="Shop")
+    created = item_service.create_item_with_file(
+        app_db_session, data=data, primary_upload=upload, thumbnail_upload=thumb, drive_client=fake_client
+    )
+
+    def _boom(url: str) -> None:
+        raise AssertionError("should not fetch when item already has a thumbnail")
+
+    monkeypatch.setattr(thumbnail_service, "try_fetch_thumbnail", _boom)
+
+    item_service.update_item(
+        app_db_session,
+        created.id,
+        ItemUpdate(name="Already Has One", shop_name="Shop", product_url="https://booth.example/items/2"),
+        drive_client=fake_client,
+    )
+
+    item = app_db_session.get(Item, created.id)
+    assert item.thumbnail_file.original_filename == "keep.png"
+
+
+def test_update_item_metadata_still_saves_when_thumbnail_upload_fails(
+    app_db_session: Session, tmp_path: Path
+) -> None:
+    created = _create_item(app_db_session, tmp_path, name="Old Name")
+    thumbnail = _make_upload(tmp_path, name="thumb.png", content=b"\x89PNG\r\n", extension=".png")
+    thumbnail.path.unlink()  # make the local file vanish so FakeDriveClient.upload_file fails
+
+    updated = item_service.update_item(
+        app_db_session,
+        created.id,
+        ItemUpdate(name="New Name", shop_name="Shop"),
+        thumbnail_upload=thumbnail,
+        drive_client=FakeDriveClient(),
+    )
+
+    assert updated.name == "New Name"
+    assert updated.has_thumbnail is False
 
 
 def test_add_update_check_records_history_entry(app_db_session: Session, tmp_path: Path) -> None:

@@ -154,7 +154,77 @@ def get_item_detail(db: Session, item_id: int) -> ItemDetail:
     return _to_detail(item)
 
 
-def update_item(db: Session, item_id: int, data: ItemUpdate) -> ItemRead:
+def _resolve_edit_thumbnail(item: Item, data: ItemUpdate, thumbnail_upload: ValidatedUpload | None) -> _ResolvedThumbnail | None:
+    if thumbnail_upload is not None:
+        return _ResolvedThumbnail(upload=thumbnail_upload, owned=False)
+    if item.thumbnail_file is not None or not data.product_url:
+        return None
+
+    fetched = thumbnail_service.try_fetch_thumbnail(data.product_url)
+    if fetched is None:
+        return None
+
+    return _ResolvedThumbnail(upload=_write_fetched_thumbnail(fetched), owned=True)
+
+
+def _apply_thumbnail(db: Session, item: Item, resolved: _ResolvedThumbnail, drive_client: DriveClient | None) -> None:
+    """Best-effort: an item's metadata edit must never fail because of the thumbnail
+    (matches create_item_with_file's treatment of thumbnails as non-fatal, including
+    for Drive-not-connected -- resolving the client happens inside this try too).
+
+    Reuses the item's existing Drive folder (from its primary file) rather than
+    recomputing folder_layout paths -- an edit never moves already-uploaded
+    files, only adds/replaces the thumbnail in place.
+    """
+    folder_id = item.primary_file.drive_folder_id if item.primary_file else None
+    if not folder_id:
+        return
+    try:
+        if drive_client is None:
+            drive_client = oauth_service.make_drive_client(db)
+        drive_file = drive_client.upload_file(
+            local_path=resolved.upload.path,
+            name=resolved.upload.original_filename,
+            parent_id=folder_id,
+            mime_type=resolved.upload.content_type,
+        )
+        old_thumbnail = item.thumbnail_file
+        if old_thumbnail is not None:
+            try:
+                drive_client.delete_file(old_thumbnail.drive_file_id)
+            except Exception:
+                logger.warning("failed to delete replaced thumbnail from Drive (non-fatal)", exc_info=True)
+            db.delete(old_thumbnail)
+            db.flush()
+        db.add(
+            ItemFile(
+                item_id=item.id,
+                file_role=FileRole.THUMBNAIL,
+                drive_file_id=drive_file.id,
+                drive_folder_id=folder_id,
+                original_filename=resolved.upload.original_filename,
+                stored_filename=resolved.upload.path.name,
+                content_type=resolved.upload.content_type,
+                size_bytes=resolved.upload.size_bytes,
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning("thumbnail update failed during item edit (non-fatal)", exc_info=True)
+    finally:
+        if resolved.owned:
+            resolved.upload.path.unlink(missing_ok=True)
+
+
+def update_item(
+    db: Session,
+    item_id: int,
+    data: ItemUpdate,
+    *,
+    thumbnail_upload: ValidatedUpload | None = None,
+    drive_client: DriveClient | None = None,
+) -> ItemRead:
     item = db.get(Item, item_id)
     if item is None:
         raise NotFoundError("Item", item_id)
@@ -187,6 +257,12 @@ def update_item(db: Session, item_id: int, data: ItemUpdate) -> ItemRead:
 
     db.commit()
     db.refresh(item)
+
+    resolved_thumbnail = _resolve_edit_thumbnail(item, data, thumbnail_upload)
+    if resolved_thumbnail is not None:
+        _apply_thumbnail(db, item, resolved_thumbnail, drive_client)
+        db.refresh(item)
+
     drive_sync_service.mark_dirty()
     logger.info("item updated id=%s", item.id)
     return _to_read(item)
@@ -202,6 +278,21 @@ def add_update_check(db: Session, item_id: int, note: str | None) -> None:
     logger.info("update check recorded for item id=%s", item.id)
 
 
+def _write_fetched_thumbnail(fetched: thumbnail_service.FetchedThumbnail) -> ValidatedUpload:
+    settings = get_settings()
+    settings.upload_tmp_dir.mkdir(parents=True, exist_ok=True)
+    ext = mimetypes.guess_extension(fetched.content_type) or ".jpg"
+    tmp_path = settings.upload_tmp_dir / f"{uuid.uuid4().hex}{ext}"
+    tmp_path.write_bytes(fetched.content)
+    return ValidatedUpload(
+        path=tmp_path,
+        original_filename=f"thumbnail{ext}",
+        size_bytes=len(fetched.content),
+        content_type=fetched.content_type,
+        extension=ext,
+    )
+
+
 def _resolve_thumbnail(data: ItemCreate, thumbnail_upload: ValidatedUpload | None) -> _ResolvedThumbnail | None:
     if thumbnail_upload is not None:
         return _ResolvedThumbnail(upload=thumbnail_upload, owned=False)
@@ -212,19 +303,7 @@ def _resolve_thumbnail(data: ItemCreate, thumbnail_upload: ValidatedUpload | Non
     if fetched is None:
         return None
 
-    settings = get_settings()
-    settings.upload_tmp_dir.mkdir(parents=True, exist_ok=True)
-    ext = mimetypes.guess_extension(fetched.content_type) or ".jpg"
-    tmp_path = settings.upload_tmp_dir / f"{uuid.uuid4().hex}{ext}"
-    tmp_path.write_bytes(fetched.content)
-    upload = ValidatedUpload(
-        path=tmp_path,
-        original_filename=f"thumbnail{ext}",
-        size_bytes=len(fetched.content),
-        content_type=fetched.content_type,
-        extension=ext,
-    )
-    return _ResolvedThumbnail(upload=upload, owned=True)
+    return _ResolvedThumbnail(upload=_write_fetched_thumbnail(fetched), owned=True)
 
 
 def _resolve_status(db: Session, status_code: str | None) -> Status | None:

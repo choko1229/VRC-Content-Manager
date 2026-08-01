@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
@@ -33,6 +34,11 @@ from app.web.templating import templates
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Placeholder shop for the quick-upload flow (Google Drive-style: drop a file
+# first, fill in the real shop/name/tags afterward on the edit page).
+UNASSIGNED_SHOP_NAME = "未設定"
+THUMBNAIL_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg"})
+
 
 def _split_csv(raw: str) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()]
@@ -53,124 +59,60 @@ def _form_context(db: Session, *, error: str | None = None, form_values: dict | 
     }
 
 
+def _quick_upload_context(db: Session, *, error: str | None = None) -> dict:
+    return {
+        "allowed_extensions": ", ".join(sorted(DEFAULT_ALLOWED_EXTENSIONS)),
+        "accept_extensions": ",".join(sorted(DEFAULT_ALLOWED_EXTENSIONS)),
+        "max_upload_size_mb": app_config_service.get_max_upload_size_mb(db),
+        "error": error,
+    }
+
+
 @router.get("/items/new")
 def new_item_page(request: Request, db: Session = Depends(get_db)):
-    created_name = request.query_params.get("created")
-    return templates.TemplateResponse(
-        request,
-        "items/ingest_form.html",
-        {**_form_context(db), "created_name": created_name},
-    )
+    return templates.TemplateResponse(request, "items/ingest_form.html", _quick_upload_context(db))
+
+
+def _derive_name_from_filename(filename: str) -> str:
+    stem = Path(filename).stem.strip()
+    return (stem or filename.strip() or "無題の商品")[:255]
 
 
 @router.post("/items/new", dependencies=[Depends(verify_csrf)])
 async def create_item(
     request: Request,
-    name: str = Form(...),
-    shop_name: str = Form(...),
-    shop_url: str = Form(""),
-    product_url: str = Form(""),
-    download_source_url: str = Form(""),
-    purchase_date: str = Form(""),
-    download_date: str = Form(""),
-    price: str = Form(""),
-    status_code: str = Form(""),
-    memo: str = Form(""),
-    is_favorite: bool = Form(False),
-    tags: str = Form(""),
-    avatars: str = Form(""),
-    commercial_use: str = Form("unknown"),
-    modification_allowed: str = Form("unknown"),
-    redistribution_allowed: str = Form("unknown"),
-    credit_required: str = Form("unknown"),
-    license_note: str = Form(""),
     file: UploadFile | None = None,
-    thumbnail: UploadFile | None = None,
     db: Session = Depends(get_db),
 ):
-    form_values = {
-        "name": name,
-        "shop_name": shop_name,
-        "shop_url": shop_url,
-        "product_url": product_url,
-        "download_source_url": download_source_url,
-        "purchase_date": purchase_date,
-        "download_date": download_date,
-        "price": price,
-        "status_code": status_code,
-        "memo": memo,
-        "is_favorite": is_favorite,
-        "tags": tags,
-        "avatars": avatars,
-        "commercial_use": commercial_use,
-        "modification_allowed": modification_allowed,
-        "redistribution_allowed": redistribution_allowed,
-        "credit_required": credit_required,
-        "license_note": license_note,
-    }
-
     def _error_response(message: str, status_code_http: int = 422):
         return templates.TemplateResponse(
             request,
             "items/ingest_form.html",
-            {**_form_context(db, error=message, form_values=form_values), "created_name": None},
+            _quick_upload_context(db, error=message),
             status_code=status_code_http,
         )
 
     if file is None or not file.filename:
         return _error_response("ファイルを選択してください。")
 
-    try:
-        item_data = ItemCreate(
-            name=name,
-            shop_name=shop_name,
-            shop_url=shop_url or None,
-            product_url=product_url or None,
-            download_source_url=download_source_url or None,
-            purchase_date=purchase_date or None,
-            download_date=download_date or None,
-            price=int(price) if price.strip() else None,
-            status_code=status_code or None,
-            memo=memo or None,
-            is_favorite=is_favorite,
-            tags=_split_csv(tags),
-            avatars=_split_csv(avatars),
-            commercial_use=commercial_use,
-            modification_allowed=modification_allowed,
-            redistribution_allowed=redistribution_allowed,
-            credit_required=credit_required,
-            license_note=license_note or None,
-        )
-    except (ValidationError, ValueError) as exc:
-        logger.warning("item create validation failed: %s", exc)
-        return _error_response("入力内容を確認してください。")
-
     settings = get_settings()
     max_upload_size_mb = app_config_service.get_max_upload_size_mb(db)
     primary_upload: ValidatedUpload | None = None
-    thumbnail_upload: ValidatedUpload | None = None
     try:
         try:
             primary_upload = await upload_service.stream_and_validate_upload(
                 file, dest_dir=settings.upload_tmp_dir, max_size_mb=max_upload_size_mb
             )
-            if thumbnail is not None and thumbnail.filename:
-                thumbnail_upload = await upload_service.stream_and_validate_upload(
-                    thumbnail,
-                    dest_dir=settings.upload_tmp_dir,
-                    max_size_mb=max_upload_size_mb,
-                    allowed_extensions=frozenset({".png", ".jpg", ".jpeg"}),
-                )
         except UploadValidationError as exc:
             return _error_response(str(exc))
 
+        item_data = ItemCreate(
+            name=_derive_name_from_filename(primary_upload.original_filename),
+            shop_name=UNASSIGNED_SHOP_NAME,
+        )
         try:
             created = await run_in_threadpool(
-                item_service.create_item_with_file,
-                db,
-                data=item_data,
-                primary_upload=primary_upload,
-                thumbnail_upload=thumbnail_upload,
+                item_service.create_item_with_file, db, data=item_data, primary_upload=primary_upload
             )
         except oauth_service.NotConnectedError:
             return _error_response(
@@ -181,9 +123,8 @@ async def create_item(
             return _error_response(f"Google Driveへのアップロードに失敗しました: {exc}", status_code_http=502)
     finally:
         upload_service.cleanup_upload(primary_upload)
-        upload_service.cleanup_upload(thumbnail_upload)
 
-    return RedirectResponse(url=f"/items/new?created={created.name}", status_code=303)
+    return RedirectResponse(url=f"/items/{created.id}/edit?uploaded=1", status_code=303)
 
 
 @router.get("/items")
@@ -269,6 +210,7 @@ def edit_item_page(request: Request, item_id: int, db: Session = Depends(get_db)
     except NotFoundError:
         raise HTTPException(status_code=404, detail="商品が見つかりません。")
 
+    just_uploaded = request.query_params.get("uploaded") == "1"
     form_values = {
         "name": detail.name,
         "shop_name": detail.shop_name or "",
@@ -290,12 +232,18 @@ def edit_item_page(request: Request, item_id: int, db: Session = Depends(get_db)
         "license_note": detail.license_note or "",
     }
     return templates.TemplateResponse(
-        request, "items/edit_form.html", _edit_form_context(db, item_id, form_values=form_values)
+        request,
+        "items/edit_form.html",
+        {
+            **_edit_form_context(db, item_id, form_values=form_values),
+            "just_uploaded": just_uploaded,
+            "has_thumbnail": detail.has_thumbnail,
+        },
     )
 
 
 @router.post("/items/{item_id}/edit", dependencies=[Depends(verify_csrf)])
-def submit_edit_item(
+async def submit_edit_item(
     request: Request,
     item_id: int,
     name: str = Form(...),
@@ -316,6 +264,7 @@ def submit_edit_item(
     redistribution_allowed: str = Form("unknown"),
     credit_required: str = Form("unknown"),
     license_note: str = Form(""),
+    thumbnail: UploadFile | None = None,
     db: Session = Depends(get_db),
 ):
     form_values = {
@@ -372,9 +321,28 @@ def submit_edit_item(
         logger.warning("item update validation failed: %s", exc)
         return _error_response("入力内容を確認してください。")
 
+    settings = get_settings()
+    max_upload_size_mb = app_config_service.get_max_upload_size_mb(db)
+    thumbnail_upload: ValidatedUpload | None = None
     try:
-        item_service.update_item(db, item_id, item_data)
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="商品が見つかりません。")
+        if thumbnail is not None and thumbnail.filename:
+            try:
+                thumbnail_upload = await upload_service.stream_and_validate_upload(
+                    thumbnail,
+                    dest_dir=settings.upload_tmp_dir,
+                    max_size_mb=max_upload_size_mb,
+                    allowed_extensions=THUMBNAIL_EXTENSIONS,
+                )
+            except UploadValidationError as exc:
+                return _error_response(str(exc))
+
+        try:
+            await run_in_threadpool(
+                item_service.update_item, db, item_id, item_data, thumbnail_upload=thumbnail_upload
+            )
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="商品が見つかりません。")
+    finally:
+        upload_service.cleanup_upload(thumbnail_upload)
 
     return RedirectResponse(url=f"/items/{item_id}", status_code=303)

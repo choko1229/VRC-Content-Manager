@@ -6,9 +6,10 @@
 
 {{ ui.page_title("商品編集", icon="edit") }}
 
+{% if just_uploaded %}{{ ui.alert("アップロードしました。商品名・ショップ・タグなどの詳細を入力してください。", variant="success") }}{% endif %}
 {% if error %}{{ ui.alert(error, variant="error") }}{% endif %}
 
-<form method="post" action="/items/{{ item_id }}/edit" class="space-y-6">
+<form method="post" action="/items/{{ item_id }}/edit" enctype="multipart/form-data" class="space-y-6">
   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 
   {% call ui.glass() %}
@@ -18,8 +19,31 @@
     {{ ui.text_field("shop_name", "ショップ名", required=True, value=form_values.get('shop_name', ''), list_id="shop-list") }}
     <datalist id="shop-list">{% for s in shops %}<option value="{{ s }}">{% endfor %}</datalist>
     {{ ui.text_field("shop_url", "ショップURL", type="url", value=form_values.get('shop_url', '')) }}
-    {{ ui.text_field("product_url", "商品ページURL", type="url", value=form_values.get('product_url', '')) }}
+    {{ ui.text_field("product_url", "商品ページURL", type="url", value=form_values.get('product_url', ''),
+        help_text="BOOTHの商品ページURLを貼り付けると、商品名・ショップ名・価格・説明文を自動取得します(取得後も修正できます)。タグ・対応アバターは候補として表示されます。",
+        attrs='hx-get="/fragments/items/fetch-info" hx-trigger="change" hx-target="#fetch-info-result" hx-swap="innerHTML" hx-include="this" hx-indicator="#fetch-info-indicator"') }}
     {{ ui.text_field("download_source_url", "ダウンロード元URL", type="url", value=form_values.get('download_source_url', ''), extra="sm:col-span-2") }}
+  </div>
+  <p id="fetch-info-indicator" class="htmx-indicator mt-3 inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
+    <span class="icon text-[1rem]" aria-hidden="true">progress_activity</span>商品情報を取得中…
+  </p>
+  <div id="fetch-info-result" aria-live="polite" class="mt-3"></div>
+  {% endcall %}
+
+  {% call ui.glass() %}
+  <h2 class="text-lg font-bold mb-4">サムネイル画像</h2>
+  {% if has_thumbnail %}
+  <div class="flex items-center gap-3 mb-4">
+    <img src="/items/{{ item_id }}/thumbnail" alt="現在のサムネイル" class="w-16 h-16 rounded-xl object-cover border border-white/60 dark:border-white/10 shrink-0">
+    <p class="text-xs text-slate-500 dark:text-slate-400">現在のサムネイルです。新しい画像を選択すると置き換えられます。</p>
+  </div>
+  {% endif %}
+  <div id="dropzone-thumbnail" class="dropzone rounded-2xl border-2 border-dashed border-slate-300/70 dark:border-white/15 bg-white/40 dark:bg-white/5 backdrop-blur px-4 py-6 text-center transition">
+    <span class="icon text-3xl text-accent dark:text-accent-dark" aria-hidden="true">add_photo_alternate</span>
+    <p class="text-sm text-slate-600 dark:text-slate-300 mt-1">ここにドラッグ&ドロップ、または下のボタンから選択</p>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mt-1" data-filename-for="f-thumbnail"></p>
+    <input id="f-thumbnail" type="file" name="thumbnail" accept="image/png,image/jpeg"
+           class="mt-3 block w-full text-sm text-slate-600 dark:text-slate-300 file:mr-3 file:min-h-9 file:px-4 file:rounded-full file:border-0 file:bg-white/70 dark:file:bg-white/10 file:text-slate-800 dark:file:text-slate-100 file:font-semibold file:cursor-pointer hover:file:brightness-95 cursor-pointer">
   </div>
   {% endcall %}
 
@@ -62,4 +86,55 @@
 
   {{ ui.btn("保存", variant="primary", icon="save", type="submit") }}
 </form>
+
+<script>
+(function () {
+  var zone = document.getElementById("dropzone-thumbnail");
+  var input = document.getElementById("f-thumbnail");
+  var filenameEl = zone.querySelector('[data-filename-for="f-thumbnail"]');
+
+  function showFilename() {
+    filenameEl.textContent = input.files && input.files.length ? input.files[0].name : "";
+  }
+
+  ["dragenter", "dragover"].forEach(function (evt) {
+    zone.addEventListener(evt, function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.add("border-accent", "dark:border-accent-dark", "bg-accent/10");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (evt) {
+    zone.addEventListener(evt, function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.remove("border-accent", "dark:border-accent-dark", "bg-accent/10");
+    });
+  });
+  zone.addEventListener("drop", function (e) {
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      input.files = e.dataTransfer.files;
+      showFilename();
+    }
+  });
+  input.addEventListener("change", showFilename);
+
+  // BOOTH auto-fetch suggestion chips (タグ/対応アバター候補) are inserted via
+  // htmx OOB swap, so listen on a stable ancestor rather than binding per-chip.
+  document.addEventListener("click", function (e) {
+    var chip = e.target.closest(".js-suggestion-chip");
+    if (!chip) return;
+    var field = document.getElementById(chip.dataset.suggestField);
+    if (!field) return;
+    var value = chip.dataset.suggestValue;
+    var current = field.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    var alreadyPresent = current.some(function (v) { return v.toLowerCase() === value.toLowerCase(); });
+    if (!alreadyPresent) {
+      current.push(value);
+      field.value = current.join(", ");
+    }
+    chip.disabled = true;
+  });
+})();
+</script>
 {% endblock %}
