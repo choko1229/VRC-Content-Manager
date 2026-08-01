@@ -1,14 +1,21 @@
 {% import "_macros.html" as ui %}
+{% set placeholder_variants = [
+  ("/static/img/card-placeholder-blue.svg", "text-[#0D47A1]"),
+  ("/static/img/card-placeholder-yellow.svg", "text-[#964F05]"),
+  ("/static/img/card-placeholder-red.svg", "text-[#C5221F]"),
+  ("/static/img/card-placeholder-green.svg", "text-[#137333]"),
+] %}
 {% if items %}
 <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
   {% for item in items %}
-  <div class="group rounded-3xl border border-white/60 dark:border-white/10 bg-white/75 dark:bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-slate-200/40 dark:shadow-black/20 overflow-hidden transition hover:shadow-xl hover:-translate-y-0.5">
+  {% set placeholder_url, placeholder_text = placeholder_variants[item.id % 4] %}
+  <div class="group rounded-3xl border border-white/60 dark:border-white/10 bg-white/75 dark:bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-slate-200/40 dark:shadow-black/20 overflow-hidden transition motion-safe:hover:shadow-xl motion-safe:hover:-translate-y-0.5">
     <a href="/items/{{ item.id }}" class="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark rounded-t-3xl">
-      <div class="aspect-square bg-gradient-to-br from-white/40 to-white/10 dark:from-white/10 dark:to-transparent flex items-center justify-center overflow-hidden">
+      <div class="aspect-square flex items-center justify-center overflow-hidden {% if not item.has_thumbnail %}bg-[url('{{ placeholder_url }}')] bg-cover bg-center{% endif %}">
         {% if item.has_thumbnail %}
           <img src="/items/{{ item.id }}/thumbnail" alt="" class="w-full h-full object-cover">
         {% else %}
-          <div class="flex flex-col items-center gap-1 text-slate-400 dark:text-slate-500 text-xs">
+          <div class="flex flex-col items-center gap-1 text-xs font-semibold {{ placeholder_text }}">
             <span class="icon text-3xl" aria-hidden="true">image</span>No Image
           </div>
         {% endif %}
