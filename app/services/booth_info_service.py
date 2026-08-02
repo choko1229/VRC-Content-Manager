@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import httpx
 from bs4 import BeautifulSoup
 
-from app.services.booth_common import REQUEST_TIMEOUT_SECONDS, USER_AGENT, robots_allow
+from app.services.booth_common import make_client, robots_allow
 
 logger = logging.getLogger(__name__)
 
@@ -152,11 +152,7 @@ def try_fetch_shop_info(shop_url: str | None, *, client: httpx.Client | None = N
         if client is not None:
             return _fetch_shop(client, shop_url)
 
-        with httpx.Client(
-            timeout=REQUEST_TIMEOUT_SECONDS,
-            headers={"User-Agent": USER_AGENT},
-            follow_redirects=True,
-        ) as owned_client:
+        with make_client() as owned_client:
             return _fetch_shop(owned_client, shop_url)
     except Exception:
         logger.warning("shop info auto-fetch failed for %s", shop_url, exc_info=True)
@@ -189,11 +185,7 @@ def try_fetch_product_info(product_url: str | None, *, client: httpx.Client | No
         if client is not None:
             return _fetch(client, product_url)
 
-        with httpx.Client(
-            timeout=REQUEST_TIMEOUT_SECONDS,
-            headers={"User-Agent": USER_AGENT},
-            follow_redirects=True,
-        ) as owned_client:
+        with make_client() as owned_client:
             return _fetch(owned_client, product_url)
     except Exception:
         logger.warning("product info auto-fetch failed for %s", product_url, exc_info=True)

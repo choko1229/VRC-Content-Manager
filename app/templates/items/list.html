@@ -220,6 +220,26 @@
         });
         return;
       }
+      // The "load" event fires for any completed response, including
+      // server errors (500) or an upstream proxy failure (502/504) -- those
+      // carry no upload_error param, so without this check they'd fall
+      // through to the success branch below despite the item never having
+      // been created.
+      if (xhr.status < 200 || xhr.status >= 400) {
+        var serverMessage = null;
+        try {
+          serverMessage = JSON.parse(xhr.responseText).detail;
+        } catch (err) {
+          serverMessage = null;
+        }
+        window.Toast.update(toastId, {
+          title: "アップロードに失敗しました",
+          message: serverMessage || ("サーバーエラー (" + xhr.status + ")"),
+          variant: "error",
+          duration: 8000,
+        });
+        return;
+      }
       window.Toast.update(toastId, {
         title: "アップロード完了",
         message: file.name + " を一覧に追加しました",

@@ -31,6 +31,7 @@ special-cased "was it deleted?" branch needed here.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -40,6 +41,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import DriveError
 from app.core.validation import DEFAULT_ALLOWED_EXTENSIONS
+from app.db.session import get_sessionmaker
 from app.drive import folder_layout
 from app.drive.client import DriveClient
 from app.drive.types import FOLDER_MIME_TYPE, DriveFile
@@ -47,12 +49,19 @@ from app.models.item import Item
 from app.models.item_file import FileRole, ItemFile
 from app.models.license import License
 from app.models.status import Status
-from app.services import drive_sync_service, shop_service
+from app.services import drive_sync_service, oauth_service, shop_service
 
 logger = logging.getLogger(__name__)
 
 _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg"})
 _UNASSIGNED_SHOP_NAME = "未設定"
+
+# Reconcile lists Drive folder contents and Drive-checks every synced file
+# each run, so it's pricier than the upload/download sweeps -- a few minutes
+# is plenty to make a file dropped directly into Drive's upload/ folder show
+# up automatically, without needing the manual "reconcile now" button on
+# /settings for every single one.
+_RECONCILE_INTERVAL_SECONDS = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,3 +272,32 @@ def _build_item_file(item_id: int, role: FileRole, drive_file: DriveFile, folder
         size_bytes=drive_file.size_bytes or 0,
         synced_at=datetime.now(timezone.utc),
     )
+
+
+def _reconcile_now_blocking() -> None:
+    session_local = get_sessionmaker()
+    with session_local() as db:
+        try:
+            drive_client = oauth_service.make_drive_client(db)
+        except oauth_service.NotConnectedError:
+            logger.info("drive_reconcile_service: Drive not connected, skipping periodic reconcile")
+            return
+        reconcile(db, drive_client)
+
+
+async def reconcile_loop(stop_event: asyncio.Event) -> None:
+    """Periodic fallback so a file dropped directly into Drive's upload/
+    folder (or file/ folder) is picked up automatically, the same way a
+    file uploaded through the app is -- without requiring a manual visit to
+    /settings and clicking "reconcile now" every time."""
+    while not stop_event.is_set():
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=_RECONCILE_INTERVAL_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+        if stop_event.is_set():
+            break
+        try:
+            await asyncio.to_thread(_reconcile_now_blocking)
+        except Exception:
+            logger.exception("drive_reconcile_service: periodic reconcile sweep failed")

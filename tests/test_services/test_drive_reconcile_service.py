@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,7 +10,7 @@ from app.drive import folder_layout
 from app.drive.fake_drive_client import FakeDriveClient
 from app.models.item import Item
 from app.schemas.item import ItemCreate
-from app.services import drive_reconcile_service, item_service
+from app.services import drive_reconcile_service, item_service, oauth_service
 from app.services.upload_service import ValidatedUpload
 
 
@@ -211,3 +212,37 @@ def test_reconcile_regenerates_root_folder_if_deleted(app_db_session: Session, t
     assert result.imported_items == 0
     new_root_id = fake_client.get_or_create_folder(folder_layout.ROOT_FOLDER_NAME)
     assert new_root_id != root_id  # a fresh folder was created, not the deleted one
+
+
+def test_reconcile_now_blocking_imports_file_dropped_directly_into_drive(
+    app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Covers the periodic background sweep (reconcile_loop) rather than the
+    # manual /settings button: a file dropped straight into Drive's upload/
+    # folder should turn into a visible item on its own, the same way an
+    # in-app upload does, without anyone clicking "reconcile now".
+    fake_client = FakeDriveClient()
+    upload_id = folder_layout.ensure_upload_folder(fake_client)
+    asset_path = tmp_path / "auto-picked-up.zip"
+    asset_path.write_bytes(b"zip bytes")
+    fake_client.upload_file(local_path=asset_path, name="auto-picked-up.zip", parent_id=upload_id, mime_type="application/zip")
+    monkeypatch.setattr(oauth_service, "make_drive_client", lambda db: fake_client)
+
+    drive_reconcile_service._reconcile_now_blocking()
+
+    items = app_db_session.execute(select(Item)).scalars().all()
+    assert len(items) == 1
+    assert items[0].name == "auto-picked-up"
+
+
+def test_reconcile_now_blocking_is_a_noop_when_drive_not_connected(
+    app_db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _raise_not_connected(db):
+        raise oauth_service.NotConnectedError()
+
+    monkeypatch.setattr(oauth_service, "make_drive_client", _raise_not_connected)
+
+    drive_reconcile_service._reconcile_now_blocking()  # must not raise
+
+    assert app_db_session.execute(select(Item)).scalars().all() == []

@@ -18,7 +18,7 @@ import filetype
 import httpx
 from bs4 import BeautifulSoup
 
-from app.services.booth_common import REQUEST_TIMEOUT_SECONDS, USER_AGENT
+from app.services.booth_common import make_client
 from app.services.booth_common import robots_allow as _robots_allow
 
 logger = logging.getLogger(__name__)
@@ -76,11 +76,7 @@ def try_fetch_thumbnail(product_url: str | None, *, client: httpx.Client | None 
         if client is not None:
             return _fetch(client, product_url)
 
-        with httpx.Client(
-            timeout=REQUEST_TIMEOUT_SECONDS,
-            headers={"User-Agent": USER_AGENT},
-            follow_redirects=True,
-        ) as owned_client:
+        with make_client() as owned_client:
             return _fetch(owned_client, product_url)
     except Exception:
         logger.warning("thumbnail auto-fetch failed for %s", product_url, exc_info=True)
