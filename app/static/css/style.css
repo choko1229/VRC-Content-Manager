@@ -6,6 +6,13 @@
   page/markup pattern is in use).
 */
 
+/* Tailwind's default scale is almost entirely rem-based, so shrinking the
+   root font-size scales spacing/sizing/radii/type together -- a uniform
+   85% zoom without having to touch every utility class across templates. */
+html {
+  font-size: 85%;
+}
+
 .icon {
   font-family: "Material Symbols Outlined";
   font-weight: normal;

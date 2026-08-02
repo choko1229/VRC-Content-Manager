@@ -35,18 +35,22 @@
     <p id="fetch-info-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
       <span class="icon text-[1rem]" aria-hidden="true">progress_activity</span>取得中…
     </p>
-    {# Auto-guesses a BOOTH product page from the (filename-derived) item
-       name for an item that isn't linked to one yet -- clicking a
-       suggestion fills BoothURL above and triggers the same fetch-info
-       lookup as pasting the URL by hand. Once linked, this stays empty
-       (see items/_fetch_info_result.html's OOB clear on a successful
-       fetch), so it never re-fetches on every subsequent edit. #}
-    {# hx-target="this" is required here, not optional: the enclosing
-       <form> above sets hx-target="this" (itself) for its own submit, and
-       hx-target inherits down to descendants that don't set their own --
-       without this, this element's response would replace the form itself
-       instead of just this div. #}
-    <div id="booth-suggestions" {% if not form_values.get('product_url') %}hx-get="/fragments/items/booth-search?q={{ item_name | urlencode }}" hx-trigger="load" hx-target="this" hx-swap="outerHTML"{% endif %}></div>
+    {# Searches BOOTH by the (filename-derived) item name and shows guessed
+       product matches -- clicking a suggestion fills BoothURL above and
+       triggers the same fetch-info lookup as pasting the URL by hand.
+       Manual (not auto-run-on-load) so it stays usable even after the item
+       is already linked, e.g. to double-check or re-search. hx-target is
+       set explicitly here (an id selector, not "this"), so it's unaffected
+       by the enclosing <form>'s own hx-target="this"/hx-swap="none". #}
+    <button type="button" hx-get="/fragments/items/booth-search?q={{ item_name | urlencode }}"
+            hx-target="#booth-suggestions" hx-swap="outerHTML" hx-indicator="#booth-search-indicator"
+            class="inline-flex items-center gap-1.5 min-h-8 px-3 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+      <span class="icon text-[0.95rem]" aria-hidden="true">search</span>ファイル名で検索
+    </button>
+    <p id="booth-search-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
+      <span class="icon text-[1rem]" aria-hidden="true">progress_activity</span>検索中…
+    </p>
+    <div id="booth-suggestions"></div>
     <div id="fetch-info-result" aria-live="polite"></div>
     {# Populated via OOB swap when a save's BoothURL matches another item's
        (see items/_duplicate_confirm.html) -- empty until then, and cleared

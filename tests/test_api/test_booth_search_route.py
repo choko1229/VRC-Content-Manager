@@ -79,7 +79,11 @@ def test_booth_search_route_handles_missing_query(client) -> None:
     assert "js-booth-suggestion" not in response.text
 
 
-def test_edit_panel_auto_triggers_search_when_unlinked(client, tmp_path: Path) -> None:
+def test_edit_panel_shows_a_manual_filename_search_button(client, tmp_path: Path) -> None:
+    """The search is user-triggered (a button), not auto-run on load -- see
+    items/_edit_panel.html. hx-target is an explicit id selector here, not
+    "this", so it's unaffected by the enclosing <form>'s own
+    hx-target="this"/hx-swap="none" (which would otherwise be inherited)."""
     test_client, db = client
     created = item_service.create_item_with_file(
         db, data=ItemCreate(name="Unlinked Item", shop_name="未設定"), primary_upload=_make_upload(tmp_path, "a.zip")
@@ -88,16 +92,15 @@ def test_edit_panel_auto_triggers_search_when_unlinked(client, tmp_path: Path) -
     response = test_client.get(f"/fragments/items/{created.id}/edit")
 
     assert response.status_code == 200
+    assert "ファイル名で検索" in response.text
     assert 'hx-get="/fragments/items/booth-search?q=Unlinked' in response.text
-    # The enclosing <form> sets hx-target="#detail-panel" for its own
-    # submit, and hx-target inherits to descendants that don't set their
-    # own -- without an explicit override here, this element's response
-    # would replace the whole detail panel (form and all) instead of
-    # just itself.
-    assert 'hx-target="this"' in response.text
+    assert 'hx-target="#booth-suggestions"' in response.text
 
 
-def test_edit_panel_does_not_auto_trigger_search_when_already_linked(client, tmp_path: Path) -> None:
+def test_edit_panel_shows_the_search_button_even_when_already_linked(client, tmp_path: Path) -> None:
+    """Unlike the old auto-search-on-load behavior (which only ever ran for
+    an unlinked item), the manual button stays available after a BoothURL
+    is already set too -- useful to re-search or double-check a match."""
     test_client, db = client
     created = item_service.create_item_with_file(
         db, data=ItemCreate(name="Linked Item", shop_name="未設定", product_url="https://booth.pm/ja/items/9"),
@@ -107,7 +110,7 @@ def test_edit_panel_does_not_auto_trigger_search_when_already_linked(client, tmp
     response = test_client.get(f"/fragments/items/{created.id}/edit")
 
     assert response.status_code == 200
-    assert "/fragments/items/booth-search" not in response.text
+    assert 'hx-get="/fragments/items/booth-search?q=Linked' in response.text
 
 
 def test_fetch_info_result_clears_suggestions_on_successful_fetch(client, monkeypatch: pytest.MonkeyPatch) -> None:
