@@ -93,6 +93,16 @@ async def fetch_info_fragment(request: Request, product_url: str = "", db: Sessi
     )
 
 
+@router.get("/booth-search")
+async def booth_search_fragment(request: Request, q: str = ""):
+    # Best-effort candidate list for an item that isn't linked to a BOOTH
+    # page yet -- see items/_edit_panel.html, which triggers this on load
+    # using the item's (filename-derived) name as the query, and
+    # booth_info_service.search_products for the low-risk fetch policy.
+    results = await run_in_threadpool(booth_info_service.search_products, q)
+    return templates.TemplateResponse(request, "items/_booth_search_result.html", {"results": results})
+
+
 @router.get("")
 def search_items_fragment(request: Request, db: Session = Depends(get_db)):
     params = request.query_params

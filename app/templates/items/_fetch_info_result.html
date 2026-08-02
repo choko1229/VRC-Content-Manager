@@ -11,4 +11,6 @@
 {% if info.description %}{{ ui.oob_textarea_value("f-description", "description", info.description) }}{% endif %}
 {% if info.image_url %}<img id="thumbnail-preview" src="{{ info.image_url }}" alt="サムネイルプレビュー" hx-swap-oob="true" class="w-20 h-20 rounded-xl object-cover border border-white/60 dark:border-white/10 mt-1.5 mb-2">{% endif %}
 {{ ui.avatar_checkbox_group(avatar_options, checked_ids, oob=True) }}
+{# Now linked to a real BOOTH page -- the filename-guess suggestions above are no longer relevant. #}
+<div id="booth-suggestions" hx-swap-oob="true"></div>
 {% endif %}

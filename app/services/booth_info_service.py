@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from urllib.parse import quote
 
 import httpx
 from bs4 import BeautifulSoup
@@ -24,6 +25,8 @@ from bs4 import BeautifulSoup
 from app.services.booth_common import make_client, robots_allow
 
 logger = logging.getLogger(__name__)
+
+_MAX_SEARCH_RESULTS = 5
 
 
 @dataclass(slots=True)
@@ -190,3 +193,74 @@ def try_fetch_product_info(product_url: str | None, *, client: httpx.Client | No
     except Exception:
         logger.warning("product info auto-fetch failed for %s", product_url, exc_info=True)
         return None
+
+
+@dataclass(slots=True)
+class BoothSearchResult:
+    product_url: str
+    name: str
+    shop_name: str | None
+    thumbnail_url: str | None
+
+
+def _parse_search_results(soup: BeautifulSoup) -> list[BoothSearchResult]:
+    results: list[BoothSearchResult] = []
+    for card in soup.find_all("li", class_="item-card"):
+        name = card.get("data-product-name")
+        thumb_anchor = card.find("a", class_="item-card__thumbnail-image")
+        product_url = thumb_anchor.get("href") if thumb_anchor else None
+        if not name or not product_url:
+            continue
+
+        shop_name_el = card.find(class_="item-card__shop-name")
+        results.append(
+            BoothSearchResult(
+                product_url=product_url,
+                name=name,
+                shop_name=shop_name_el.get_text(strip=True) if shop_name_el else None,
+                thumbnail_url=thumb_anchor.get("data-original") if thumb_anchor else None,
+            )
+        )
+        if len(results) >= _MAX_SEARCH_RESULTS:
+            break
+    return results
+
+
+def _search(client: httpx.Client, search_url: str) -> list[BoothSearchResult]:
+    response = client.get(search_url)
+    response.raise_for_status()
+    if "text/html" not in response.headers.get("content-type", ""):
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    return _parse_search_results(soup)
+
+
+def search_products(query: str | None, *, client: httpx.Client | None = None) -> list[BoothSearchResult]:
+    """Best-effort candidate search, used to suggest a likely BOOTH product
+    page for an item whose name was only ever derived from an uploaded
+    filename. Same low-risk policy as the rest of this module: one page
+    fetched, all failures swallowed and logged -- results are only ever a
+    clickable suggestion the user reviews and accepts (or ignores) before
+    anything is filled in, so a bad or empty result must never block manual
+    entry. `client` is injectable for tests (httpx.MockTransport);
+    production callers omit it.
+    """
+    query = (query or "").strip()
+    if not query:
+        return []
+
+    search_url = f"https://booth.pm/ja/search/{quote(query)}"
+    try:
+        if not robots_allow(search_url):
+            logger.info("robots.txt disallows fetching %s; skipping BOOTH search suggestions", search_url)
+            return []
+
+        if client is not None:
+            return _search(client, search_url)
+
+        with make_client() as owned_client:
+            return _search(owned_client, search_url)
+    except Exception:
+        logger.warning("BOOTH search suggestion fetch failed for query=%r", query, exc_info=True)
+        return []

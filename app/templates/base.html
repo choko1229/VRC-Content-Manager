@@ -367,5 +367,22 @@
       });
     })();
   </script>
+
+  <script>
+    /* Delegated on `document` (see the combobox script above for why):
+       clicking a filename-guessed BOOTH suggestion (items/_edit_panel.html,
+       items/_booth_search_result.html) fills the BoothURL field and fires
+       the same "change" it'd get from pasting a URL by hand, reusing the
+       existing fetch-info lookup instead of duplicating it. */
+    document.addEventListener("click", function (e) {
+      var card = e.target.closest(".js-booth-suggestion");
+      if (!card) return;
+      var field = document.getElementById("f-product_url");
+      if (!field) return;
+      field.value = card.dataset.productUrl;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  </script>
 </body>
 </html>
