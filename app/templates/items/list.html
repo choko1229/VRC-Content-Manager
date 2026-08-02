@@ -35,7 +35,7 @@
 
     <div class="flex items-center justify-between gap-3 mb-4 flex-wrap">
       <div class="flex items-center gap-3">
-        <input id="f-quick-upload" type="file" name="file" accept="{{ accept_extensions }}" multiple class="sr-only">
+        <input id="f-quick-upload" type="file" name="file" accept="{{ accept_extensions }}" multiple class="sr-only" data-chunk-size-mb="{{ chunk_size_mb }}">
         <label for="f-quick-upload" title="対応形式: {{ allowed_extensions }} / 上限{{ max_upload_size_mb }}MB"
                class="inline-flex items-center gap-1.5 min-h-9 px-4 rounded-full text-sm font-semibold bg-accent dark:bg-accent-dark text-white dark:text-slate-950 shadow-md shadow-accent/30 hover:brightness-95 transition cursor-pointer focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent dark:focus-within:outline-accent-dark">
           <span class="icon text-[1.1rem]" aria-hidden="true">upload_file</span>アップロード
@@ -162,6 +162,12 @@
   var overlay = document.getElementById("drop-overlay");
   var csrfToken = document.querySelector('meta[name="csrf-token"]').content;
   var dragCounter = 0;
+  // Above this size, a single-request upload risks hitting a hard body-size
+  // cap on whatever sits in front of the app (Cloudflare Tunnel's Free/Pro
+  // plans cap proxied requests at 100MB, and no app-side setting can raise
+  // that) -- so instead the file is split into chunks and sent as several
+  // smaller requests. See app/services/chunked_upload_service.py.
+  var CHUNK_SIZE_BYTES = (parseInt(input.dataset.chunkSizeMb, 10) || 20) * 1024 * 1024;
 
   function refreshResultsList() {
     var form = document.getElementById("filter-form");
@@ -176,6 +182,14 @@
       duration: 0,
     });
 
+    if (file.size > CHUNK_SIZE_BYTES) {
+      uploadChunked(file, toastId);
+    } else {
+      uploadSingle(file, toastId);
+    }
+  }
+
+  function uploadSingle(file, toastId) {
     var xhr = new XMLHttpRequest();
     xhr.open("POST", "/items/new");
     xhr.setRequestHeader("X-CSRF-Token", csrfToken);
@@ -262,6 +276,72 @@
     var body = new FormData();
     body.append("file", file);
     xhr.send(body);
+  }
+
+  async function uploadChunked(file, toastId) {
+    async function postJson(url, payload) {
+      var response = await fetch(url, {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrfToken, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        var body = await response.json().catch(function () { return {}; });
+        throw new Error(body.detail || ("サーバーエラー (" + response.status + ")"));
+      }
+      return response.json();
+    }
+
+    try {
+      var init = await postJson("/items/new/chunked/init", { filename: file.name, size: file.size });
+      var chunkSize = (init.chunk_size_mb || 20) * 1024 * 1024;
+      var totalChunks = Math.ceil(file.size / chunkSize);
+
+      for (var i = 0; i < totalChunks; i++) {
+        var start = i * chunkSize;
+        var chunk = file.slice(start, Math.min(start + chunkSize, file.size));
+        var chunkResponse = await fetch("/items/new/chunked/" + init.upload_id + "/" + i, {
+          method: "POST",
+          headers: { "X-CSRF-Token": csrfToken, "Content-Type": "application/octet-stream" },
+          body: chunk,
+        });
+        if (!chunkResponse.ok) {
+          var chunkErr = await chunkResponse.json().catch(function () { return {}; });
+          throw new Error(chunkErr.detail || ("サーバーエラー (" + chunkResponse.status + ")"));
+        }
+        window.Toast.update(toastId, {
+          title: "アップロード中",
+          message: file.name,
+          progress: Math.round(((i + 1) / totalChunks) * 100),
+          duration: 0,
+        });
+      }
+
+      window.Toast.update(toastId, {
+        title: "処理中",
+        message: file.name,
+        indeterminate: true,
+        duration: 0,
+      });
+
+      await postJson("/items/new/chunked/" + init.upload_id + "/complete", {});
+
+      window.Toast.update(toastId, {
+        title: "アップロード完了",
+        message: file.name + " を一覧に追加しました",
+        variant: "success",
+        progress: 100,
+        duration: 3000,
+      });
+      refreshResultsList();
+    } catch (err) {
+      window.Toast.update(toastId, {
+        title: "アップロードに失敗しました",
+        message: (err && err.message) || "ネットワークエラーが発生しました。",
+        variant: "error",
+        duration: 8000,
+      });
+    }
   }
 
   function uploadAll(files) {

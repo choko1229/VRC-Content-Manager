@@ -18,10 +18,11 @@ from app.core.validation import DEFAULT_ALLOWED_EXTENSIONS, UploadValidationErro
 from app.db.session import get_db
 from app.models.item import Item
 from app.models.status import Status
-from app.schemas.item import ItemCreate, ItemSearchFilters
+from app.schemas.item import ItemCreate, ItemRead, ItemSearchFilters
 from app.services import (
     app_config_service,
     avatar_service,
+    chunked_upload_service,
     file_content_service,
     item_service,
     oauth_service,
@@ -80,6 +81,7 @@ def _items_list_context(
         "accept_extensions": ",".join(sorted(DEFAULT_ALLOWED_EXTENSIONS)),
         "allowed_extensions": ", ".join(sorted(DEFAULT_ALLOWED_EXTENSIONS)),
         "max_upload_size_mb": app_config_service.get_max_upload_size_mb(db),
+        "chunk_size_mb": chunked_upload_service.CHUNK_SIZE_MB,
     }
 
 
@@ -105,6 +107,25 @@ def _derive_name_from_filename(filename: str) -> str:
     return (stem or filename.strip() or "無題の商品")[:255]
 
 
+async def _create_item_from_upload(db: Session, primary_upload: ValidatedUpload) -> ItemRead:
+    """Shared by both upload paths (single-request and chunked, see
+    create_item / create_item_chunked_complete below): creates the
+    minimally-populated item, then fires the background Drive push."""
+    item_data = ItemCreate(
+        name=_derive_name_from_filename(primary_upload.original_filename),
+        shop_name=UNASSIGNED_SHOP_NAME,
+    )
+    created = await run_in_threadpool(
+        item_service.create_item_with_file, db, data=item_data, primary_upload=primary_upload
+    )
+    # Fire-and-forget: push the newly-cached file to Drive in the background
+    # instead of making the upload response wait on it (see
+    # upload_sync_service). The periodic sweep would pick it up anyway --
+    # this just makes it feel instant.
+    asyncio.create_task(asyncio.to_thread(upload_sync_service.sync_pending_now))
+    return created
+
+
 @router.post("/items/new", dependencies=[Depends(verify_csrf)])
 async def create_item(file: UploadFile | None = None, db: Session = Depends(get_db)):
     def _error_redirect(message: str) -> RedirectResponse:
@@ -124,23 +145,66 @@ async def create_item(file: UploadFile | None = None, db: Session = Depends(get_
         except UploadValidationError as exc:
             return _error_redirect(str(exc))
 
-        item_data = ItemCreate(
-            name=_derive_name_from_filename(primary_upload.original_filename),
-            shop_name=UNASSIGNED_SHOP_NAME,
-        )
-        created = await run_in_threadpool(
-            item_service.create_item_with_file, db, data=item_data, primary_upload=primary_upload
-        )
+        created = await _create_item_from_upload(db, primary_upload)
     finally:
         upload_service.cleanup_upload(primary_upload)
 
-    # Fire-and-forget: push the newly-cached file to Drive in the background
-    # instead of making the upload response wait on it (see
-    # upload_sync_service). The periodic sweep would pick it up anyway --
-    # this just makes it feel instant.
-    asyncio.create_task(asyncio.to_thread(upload_sync_service.sync_pending_now))
-
     return RedirectResponse(url=f"/items/{created.id}", status_code=303)
+
+
+# Chunked counterpart to POST /items/new above, used by the frontend for any
+# file larger than chunked_upload_service.CHUNK_SIZE_MB -- see that module's
+# docstring for why: a proxy/CDN in front of the app (Cloudflare Tunnel on
+# Free/Pro, notably) can enforce a hard ~100MB cap on a single request body
+# that no app-side setting can raise, so a large file has to arrive as
+# several smaller requests instead of one.
+@router.post("/items/new/chunked/init", dependencies=[Depends(verify_csrf)])
+async def create_item_chunked_init(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    filename = str(body.get("filename") or "")
+    total_size = int(body.get("size") or 0)
+    max_upload_size_mb = app_config_service.get_max_upload_size_mb(db)
+
+    try:
+        upload_id = await run_in_threadpool(
+            chunked_upload_service.init_session,
+            filename=filename,
+            total_size=total_size,
+            max_size_mb=max_upload_size_mb,
+        )
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {"upload_id": upload_id, "chunk_size_mb": chunked_upload_service.CHUNK_SIZE_MB}
+
+
+@router.post("/items/new/chunked/{upload_id}/complete", dependencies=[Depends(verify_csrf)])
+async def create_item_chunked_complete(upload_id: str, db: Session = Depends(get_db)):
+    try:
+        primary_upload = await run_in_threadpool(chunked_upload_service.complete_session, upload_id)
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        created = await _create_item_from_upload(db, primary_upload)
+    finally:
+        upload_service.cleanup_upload(primary_upload)
+
+    return {"item_id": created.id}
+
+
+# Registered after the /complete route above on purpose: {chunk_index} is a
+# generic path capture that would otherwise also match the literal
+# "complete" segment, and Starlette matches routes in registration order --
+# with this one first, a POST to .../complete would 422 on "complete" not
+# being a valid int instead of ever reaching create_item_chunked_complete.
+@router.post("/items/new/chunked/{upload_id}/{chunk_index}", dependencies=[Depends(verify_csrf)])
+async def create_item_chunked_part(upload_id: str, chunk_index: int, request: Request):
+    try:
+        await chunked_upload_service.write_chunk(upload_id, chunk_index, request)
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"received": chunk_index}
 
 
 @router.get("/items/{item_id}")
