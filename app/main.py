@@ -22,6 +22,7 @@ from app.services import (
     chunked_upload_service,
     drive_reconcile_service,
     drive_sync_service,
+    item_service,
     local_cache_service,
     upload_sync_service,
 )
@@ -68,6 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         asyncio.create_task(local_cache_service.purge_loop(stop_event)),
         asyncio.create_task(drive_reconcile_service.reconcile_loop(stop_event)),
         asyncio.create_task(chunked_upload_service.purge_loop(stop_event)),
+        asyncio.create_task(item_service.merge_loop(stop_event)),
     ]
     # Catch up on anything left pending from before the last shutdown (a
     # process restart while an upload was mid-sync, etc.) without waiting

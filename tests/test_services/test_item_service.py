@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import NotFoundError
 from app.drive import folder_layout
 from app.drive.fake_drive_client import _FOLDER_MIME_TYPE, FakeDriveClient
-from app.models.item import Item
+from app.models.item import Item, ItemCategory
 from app.models.item_file import FileRole
 from app.models.license import TriState
 from app.schemas.item import ItemCreate, ItemSearchFilters, ItemUpdate
@@ -203,6 +203,7 @@ def _create_item(
     is_favorite: bool = False,
     memo: str | None = None,
     status_code: str | None = None,
+    category: ItemCategory = ItemCategory.CLOTHING,
 ):
     fake_client = FakeDriveClient()
     upload = _make_upload(tmp_path, name=f"{name}.unitypackage")
@@ -214,6 +215,7 @@ def _create_item(
         is_favorite=is_favorite,
         memo=memo,
         status_code=status_code,
+        category=category,
     )
     return item_service.create_item_with_file(db, data=data, primary_upload=upload, drive_client=fake_client)
 
@@ -282,6 +284,46 @@ def test_get_item_detail_includes_license_and_history(app_db_session: Session, t
 def test_get_item_detail_raises_not_found_for_missing_item(app_db_session: Session) -> None:
     with pytest.raises(NotFoundError):
         item_service.get_item_detail(app_db_session, 999)
+
+
+def test_new_item_defaults_to_clothing_category(app_db_session: Session, tmp_path: Path) -> None:
+    # The historical implicit behavior (most items are avatar clothing/
+    # accessories) stays the default for anyone not opting into a category.
+    created = _create_item(app_db_session, tmp_path, name="Default Category Item")
+
+    detail = item_service.get_item_detail(app_db_session, created.id)
+    assert detail.category == ItemCategory.CLOTHING
+    assert detail.category_label == "衣装・アバター素材"
+
+
+def test_create_item_with_file_respects_explicit_category(app_db_session: Session, tmp_path: Path) -> None:
+    created = _create_item(app_db_session, tmp_path, name="A Shader Extension", category=ItemCategory.SHADER_EXTENSION)
+
+    detail = item_service.get_item_detail(app_db_session, created.id)
+    assert detail.category == ItemCategory.SHADER_EXTENSION
+    assert detail.category_label == "シェーダー拡張"
+
+
+def test_update_item_can_change_category(app_db_session: Session, tmp_path: Path) -> None:
+    created = _create_item(app_db_session, tmp_path, name="Reclassify Me")
+
+    item_service.update_item(
+        app_db_session,
+        created.id,
+        ItemUpdate(name="Reclassify Me", shop_name="Shop", category=ItemCategory.TOOL),
+    )
+
+    detail = item_service.get_item_detail(app_db_session, created.id)
+    assert detail.category == ItemCategory.TOOL
+
+
+def test_search_items_filters_by_category(app_db_session: Session, tmp_path: Path) -> None:
+    _create_item(app_db_session, tmp_path, name="A Tool", category=ItemCategory.TOOL)
+    _create_item(app_db_session, tmp_path, name="Some Clothing", category=ItemCategory.CLOTHING)
+
+    by_category = item_service.search_items(app_db_session, ItemSearchFilters(category=ItemCategory.TOOL))
+
+    assert {r.name for r in by_category} == {"A Tool"}
 
 
 def test_update_item_changes_metadata_and_associations(app_db_session: Session, tmp_path: Path) -> None:
@@ -568,3 +610,130 @@ def test_bulk_update_leaves_unspecified_fields_untouched(app_db_session: Session
 
 def test_bulk_update_returns_zero_for_empty_id_list(app_db_session: Session) -> None:
     assert item_service.bulk_update(app_db_session, [], status_code="in_use") == 0
+
+
+def _set_product_url(db: Session, item_id: int, url: str) -> None:
+    item = db.get(Item, item_id)
+    item.product_url = url
+    db.commit()
+
+
+def test_find_duplicate_product_url_item_finds_the_other_item(app_db_session: Session, tmp_path: Path) -> None:
+    a = _create_item(app_db_session, tmp_path, name="A")
+    b = _create_item(app_db_session, tmp_path, name="B")
+    _set_product_url(app_db_session, a.id, "https://booth.pm/ja/items/1")
+    _set_product_url(app_db_session, b.id, "https://booth.pm/ja/items/1")
+
+    found = item_service.find_duplicate_product_url_item(
+        app_db_session, "https://booth.pm/ja/items/1", exclude_item_id=a.id
+    )
+
+    assert found is not None
+    assert found.id == b.id
+
+
+def test_find_duplicate_product_url_item_returns_none_when_unique(app_db_session: Session, tmp_path: Path) -> None:
+    a = _create_item(app_db_session, tmp_path, name="A")
+    _set_product_url(app_db_session, a.id, "https://booth.pm/ja/items/1")
+
+    found = item_service.find_duplicate_product_url_item(
+        app_db_session, "https://booth.pm/ja/items/1", exclude_item_id=a.id
+    )
+
+    assert found is None
+
+
+def test_merge_item_into_moves_source_file_as_attachment_and_deletes_source(
+    app_db_session: Session, tmp_path: Path
+) -> None:
+    source = _create_item(app_db_session, tmp_path, name="Source Item")
+    target = _create_item(app_db_session, tmp_path, name="Target Item")
+    source_file_id = app_db_session.get(Item, source.id).files[0].id
+
+    result = item_service.merge_item_into(app_db_session, source.id, target.id)
+
+    assert result.id == target.id
+    assert app_db_session.get(Item, source.id) is None  # source item is gone
+
+    detail = item_service.get_item_detail(app_db_session, target.id)
+    assert detail.name == "Target Item"  # target's own metadata is untouched
+    assert len(detail.attachment_files) == 1
+    assert detail.attachment_files[0].id == source_file_id
+
+    target_item = app_db_session.get(Item, target.id)
+    assert target_item.primary_file is not None
+    assert target_item.primary_file.item_id == target.id  # target keeps its own primary
+
+
+def test_merge_item_into_reparents_source_thumbnail_when_target_has_none(
+    app_db_session: Session, tmp_path: Path
+) -> None:
+    source = _create_item(app_db_session, tmp_path, name="Source With Thumb")
+    target = _create_item(app_db_session, tmp_path, name="Target No Thumb")
+    thumb_upload = _make_upload(tmp_path, name="thumb.png", content=b"\x89PNG\r\n", extension=".png")
+    item_service.update_item(
+        app_db_session, source.id, ItemUpdate(name="Source With Thumb", shop_name="Shop"), thumbnail_upload=thumb_upload
+    )
+    assert item_service.get_item_detail(app_db_session, source.id).has_thumbnail is True
+
+    item_service.merge_item_into(app_db_session, source.id, target.id)
+
+    detail = item_service.get_item_detail(app_db_session, target.id)
+    assert detail.has_thumbnail is True
+
+
+def test_merge_item_into_drops_source_thumbnail_when_target_already_has_one(
+    app_db_session: Session, tmp_path: Path
+) -> None:
+    source = _create_item(app_db_session, tmp_path, name="Source With Thumb 2")
+    target = _create_item(app_db_session, tmp_path, name="Target With Thumb")
+    for item_id, name in [(source.id, "Source With Thumb 2"), (target.id, "Target With Thumb")]:
+        thumb_upload = _make_upload(tmp_path, name=f"thumb-{item_id}.png", content=b"\x89PNG\r\n", extension=".png")
+        item_service.update_item(app_db_session, item_id, ItemUpdate(name=name, shop_name="Shop"), thumbnail_upload=thumb_upload)
+
+    item_service.merge_item_into(app_db_session, source.id, target.id)
+
+    target_item = app_db_session.get(Item, target.id)
+    # Still exactly one thumbnail on the target -- the source's redundant one was dropped, not duplicated.
+    assert sum(1 for f in target_item.files if f.file_role.value == "thumbnail") == 1
+
+
+def test_merge_item_into_raises_not_found_for_missing_source_or_target(
+    app_db_session: Session, tmp_path: Path
+) -> None:
+    only = _create_item(app_db_session, tmp_path, name="Only Item")
+
+    with pytest.raises(NotFoundError):
+        item_service.merge_item_into(app_db_session, 999, only.id)
+    with pytest.raises(NotFoundError):
+        item_service.merge_item_into(app_db_session, only.id, 999)
+
+
+def test_auto_merge_duplicate_products_merges_all_groups_keeping_earliest(
+    app_db_session: Session, tmp_path: Path
+) -> None:
+    keep = _create_item(app_db_session, tmp_path, name="Keep Me (earliest)")
+    dup1 = _create_item(app_db_session, tmp_path, name="Duplicate 1")
+    dup2 = _create_item(app_db_session, tmp_path, name="Duplicate 2")
+    unrelated = _create_item(app_db_session, tmp_path, name="Unrelated")
+    for item_id in (keep.id, dup1.id, dup2.id):
+        _set_product_url(app_db_session, item_id, "https://booth.pm/ja/items/1")
+    _set_product_url(app_db_session, unrelated.id, "https://booth.pm/ja/items/2")
+
+    merged_count = item_service.auto_merge_duplicate_products(app_db_session)
+
+    assert merged_count == 2
+    assert app_db_session.get(Item, dup1.id) is None
+    assert app_db_session.get(Item, dup2.id) is None
+    assert app_db_session.get(Item, unrelated.id) is not None
+
+    detail = item_service.get_item_detail(app_db_session, keep.id)
+    assert len(detail.attachment_files) == 2
+
+
+def test_auto_merge_duplicate_products_is_a_noop_when_no_duplicates(app_db_session: Session, tmp_path: Path) -> None:
+    a = _create_item(app_db_session, tmp_path, name="A")
+    _set_product_url(app_db_session, a.id, "https://booth.pm/ja/items/1")
+    _create_item(app_db_session, tmp_path, name="B")  # no product_url at all
+
+    assert item_service.auto_merge_duplicate_products(app_db_session) == 0

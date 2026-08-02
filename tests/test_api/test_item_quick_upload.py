@@ -247,7 +247,6 @@ def test_edit_panel_can_register_item_as_avatar(client, tmp_path: Path) -> None:
     )
 
     assert response.status_code == 200
-    assert "アバター" in response.text  # the registered-avatar badge shows in the returned detail panel
 
     avatar = avatar_service.get_avatar_for_item(db, created.id)
     assert avatar is not None
@@ -303,7 +302,9 @@ def test_edit_panel_rejects_duplicate_avatar_name(client, tmp_path: Path) -> Non
         },
     )
 
-    assert response.status_code == 422
+    # Auto-save always returns 200 (even on a rejected change) so htmx still
+    # processes the OOB status update -- see submit_edit_item_panel_fragment.
+    assert response.status_code == 200
     assert "既に使用されています" in response.text
     assert avatar_service.get_avatar_for_item(db, created.id) is None
 
@@ -332,10 +333,237 @@ def test_edit_panel_saved_description_shows_in_detail_view(client, tmp_path: Pat
     )
 
     assert response.status_code == 200
-    assert "説明文の表示確認" in response.text  # the returned detail panel shows it immediately
 
     detail_page = test_client.get(f"/items/{created.id}")
     assert "説明文の表示確認" in detail_page.text  # and it survives a fresh page load too
+
+
+def test_autosave_persists_immediately_with_no_explicit_save_step(client, tmp_path: Path) -> None:
+    """The sidebar form has no "保存" button -- every field change (a
+    focusout, from the browser's perspective) posts here directly and must
+    be durably saved by itself, with no separate confirm/submit step."""
+    test_client, db = client
+    created = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Autosave Field", shop_name="未設定"),
+        primary_upload=_make_upload(tmp_path, "autosave.zip"),
+        drive_client=FakeDriveClient(),
+    )
+    token = _csrf_token(test_client.get(f"/fragments/items/{created.id}/edit").text)
+
+    response = test_client.post(
+        f"/fragments/items/{created.id}/edit",
+        headers={"X-CSRF-Token": token},
+        data={"csrf_token": token, "name": "Renamed By Autosave", "shop_name": "未設定"},
+    )
+
+    assert response.status_code == 200
+    # The form itself uses hx-swap="none", so the response is the small
+    # OOB-only status template -- not the full detail/edit panel.
+    assert "保存しました" in response.text
+    assert '<span id="edit-panel-title-text" hx-swap-oob="true">Renamed By Autosave</span>' in response.text
+    # Background-refreshes the item list without disturbing the open panel.
+    assert response.headers.get("hx-trigger") == "item-saved"
+
+    detail = item_service.get_item_detail(db, created.id)
+    assert detail.name == "Renamed By Autosave"
+
+
+def test_autosave_offers_confirm_dialog_instead_of_saving_a_duplicate_product_url(client, tmp_path: Path) -> None:
+    """The user chose "show a confirmation dialog" over silently
+    auto-merging (see item_service.find_duplicate_product_url_item /
+    merge_item_into) -- entering a BoothURL that another item already has
+    must not save anything until the user picks merge-or-keep-separate."""
+    test_client, db = client
+    fake_client = FakeDriveClient()
+
+    existing = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Existing Item", shop_name="未設定", product_url="https://booth.pm/ja/items/111"),
+        primary_upload=_make_upload(tmp_path, "existing.zip"),
+        drive_client=fake_client,
+    )
+    editing = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Editing Item", shop_name="未設定"),
+        primary_upload=_make_upload(tmp_path, "editing.zip"),
+        drive_client=fake_client,
+    )
+    token = _csrf_token(test_client.get(f"/fragments/items/{editing.id}/edit").text)
+
+    response = test_client.post(
+        f"/fragments/items/{editing.id}/edit",
+        headers={"X-CSRF-Token": token},
+        data={
+            "csrf_token": token,
+            "name": "Editing Item",
+            "shop_name": "未設定",
+            "product_url": "https://booth.pm/ja/items/111",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Existing Item" in response.text
+    assert f'hx-post="/fragments/items/{editing.id}/merge-into/{existing.id}"' in response.text
+    assert f'hx-post="/fragments/items/{editing.id}/edit"' in response.text
+    assert "force_duplicate" in response.text
+    # No save happened -- the product_url edit is deferred until resolved.
+    assert item_service.get_item_detail(db, editing.id).product_url is None
+
+
+def test_autosave_force_duplicate_bypasses_the_confirm_dialog(client, tmp_path: Path) -> None:
+    """Resolves the banner above's "別々のまま登録" action: the same save,
+    resubmitted with force_duplicate=true, must go through normally."""
+    test_client, db = client
+    fake_client = FakeDriveClient()
+
+    item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Existing Item", shop_name="未設定", product_url="https://booth.pm/ja/items/111"),
+        primary_upload=_make_upload(tmp_path, "existing.zip"),
+        drive_client=fake_client,
+    )
+    editing = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Editing Item", shop_name="未設定"),
+        primary_upload=_make_upload(tmp_path, "editing.zip"),
+        drive_client=fake_client,
+    )
+    token = _csrf_token(test_client.get(f"/fragments/items/{editing.id}/edit").text)
+
+    response = test_client.post(
+        f"/fragments/items/{editing.id}/edit",
+        headers={"X-CSRF-Token": token},
+        data={
+            "csrf_token": token,
+            "name": "Editing Item",
+            "shop_name": "未設定",
+            "product_url": "https://booth.pm/ja/items/111",
+            "force_duplicate": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "保存しました" in response.text
+    assert item_service.get_item_detail(db, editing.id).product_url == "https://booth.pm/ja/items/111"
+
+
+def test_merge_into_route_folds_source_item_into_target_and_returns_its_detail_panel(client, tmp_path: Path) -> None:
+    test_client, db = client
+    fake_client = FakeDriveClient()
+
+    target = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Target Item", shop_name="未設定", product_url="https://booth.pm/ja/items/222"),
+        primary_upload=_make_upload(tmp_path, "target.zip"),
+        drive_client=fake_client,
+    )
+    source = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Source Item", shop_name="未設定"),
+        primary_upload=_make_upload(tmp_path, "source.zip"),
+        drive_client=fake_client,
+    )
+    token = _meta_csrf_token(test_client.get("/items").text)
+
+    response = test_client.post(
+        f"/fragments/items/{source.id}/merge-into/{target.id}", headers={"X-CSRF-Token": token}
+    )
+
+    assert response.status_code == 200
+    assert "Target Item" in response.text
+    assert response.headers.get("hx-trigger") == "item-saved"
+
+    with pytest.raises(Exception):
+        item_service.get_item_detail(db, source.id)
+    merged = item_service.get_item_detail(db, target.id)
+    assert [f.original_filename for f in merged.attachment_files] == ["source.zip"]
+
+
+def test_inline_edit_tags_get_returns_prefilled_combobox(client, tmp_path: Path) -> None:
+    test_client, db = client
+    created = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Inline Edit Item", shop_name="未設定", tags=["夏服", "水着"]),
+        primary_upload=_make_upload(tmp_path, "inline.zip"),
+        drive_client=FakeDriveClient(),
+    )
+
+    response = test_client.get(f"/fragments/items/{created.id}/inline-edit/tags")
+
+    assert response.status_code == 200
+    assert 'value="夏服, 水着"' in response.text
+    assert f'hx-post="/fragments/items/{created.id}/inline-edit/tags"' in response.text
+
+
+def test_inline_edit_tags_post_saves_and_returns_display_cell(client, tmp_path: Path) -> None:
+    """Table view's double-click-to-edit タグ/対応アバター cells (see
+    items/_inline_display_cell.html) -- saves just the one field on blur,
+    leaving everything else on the item untouched."""
+    test_client, db = client
+    created = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Inline Edit Item", shop_name="未設定", tags=["夏服"], description="変更なし"),
+        primary_upload=_make_upload(tmp_path, "inline.zip"),
+        drive_client=FakeDriveClient(),
+    )
+    token = _meta_csrf_token(test_client.get("/items").text)
+
+    response = test_client.post(
+        f"/fragments/items/{created.id}/inline-edit/tags",
+        headers={"X-CSRF-Token": token},
+        data={"value": "冬服, 検証用"},
+    )
+
+    assert response.status_code == 200
+    assert "冬服, 検証用" in response.text
+    assert f'hx-get="/fragments/items/{created.id}/inline-edit/tags"' in response.text
+
+    detail = item_service.get_item_detail(db, created.id)
+    assert sorted(detail.tags) == ["冬服", "検証用"]
+    assert detail.description == "変更なし"  # untouched by this one-field save
+
+
+def test_inline_edit_avatars_post_resolves_names_and_ignores_unknown(client, tmp_path: Path) -> None:
+    test_client, db = client
+    avatar_item = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="My Avatar", shop_name="未設定"),
+        primary_upload=_make_upload(tmp_path, "avatar.zip"),
+        drive_client=FakeDriveClient(),
+    )
+    avatar_service.set_item_as_avatar(db, avatar_item.id, name="My Avatar", memo=None)
+    created = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Outfit", shop_name="未設定"),
+        primary_upload=_make_upload(tmp_path, "outfit.zip"),
+        drive_client=FakeDriveClient(),
+    )
+    token = _meta_csrf_token(test_client.get("/items").text)
+
+    response = test_client.post(
+        f"/fragments/items/{created.id}/inline-edit/avatars",
+        headers={"X-CSRF-Token": token},
+        data={"value": "My Avatar, Nonexistent Avatar"},
+    )
+
+    assert response.status_code == 200
+    detail = item_service.get_item_detail(db, created.id)
+    assert detail.avatars == ["My Avatar"]  # unknown name silently dropped
+
+
+def test_inline_edit_rejects_unknown_field(client, tmp_path: Path) -> None:
+    test_client, db = client
+    created = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Inline Edit Item", shop_name="未設定"),
+        primary_upload=_make_upload(tmp_path, "inline.zip"),
+        drive_client=FakeDriveClient(),
+    )
+
+    response = test_client.get(f"/fragments/items/{created.id}/inline-edit/memo")
+
+    assert response.status_code == 404
 
 
 def test_delete_item_via_detail_panel(client, tmp_path: Path) -> None:

@@ -3,7 +3,7 @@
 from app.db.base import Base
 from app.models.app_setting import AppSetting
 from app.models.avatar import Avatar, item_avatars
-from app.models.item import Item
+from app.models.item import Item, ItemCategory
 from app.models.item_dependency import ItemDependency
 from app.models.item_file import FileRole, ItemFile
 from app.models.license import License, TriState
@@ -19,6 +19,7 @@ __all__ = [
     "Avatar",
     "item_avatars",
     "Item",
+    "ItemCategory",
     "ItemDependency",
     "FileRole",
     "ItemFile",

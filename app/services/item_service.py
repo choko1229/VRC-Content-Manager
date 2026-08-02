@@ -14,20 +14,22 @@ immediately instead of waiting on the background sync.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import mimetypes
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
 from app.core.exceptions import NotFoundError
+from app.db.session import get_sessionmaker
 from app.drive.client import DriveClient
 from app.models.avatar import Avatar
-from app.models.item import Item
+from app.models.item import Item, ItemCategory
 from app.models.item_file import FileRole, ItemFile
 from app.models.license import License, TriState
 from app.models.status import Status
@@ -36,6 +38,7 @@ from app.models.update_history import UpdateHistory
 from app.schemas.item import (
     ItemCreate,
     ItemDetail,
+    ItemFileRead,
     ItemListRow,
     ItemRead,
     ItemSearchFilters,
@@ -55,6 +58,18 @@ from app.services import (
 from app.services.upload_service import ValidatedUpload
 
 logger = logging.getLogger(__name__)
+
+# Display labels for ItemCategory -- independent of whether an item is
+# registered as a selectable base avatar (Item.as_avatar/avatar_service).
+CATEGORY_LABELS: dict[ItemCategory, str] = {
+    ItemCategory.CLOTHING: "衣装・アバター素材",
+    ItemCategory.AVATAR: "アバター本体",
+    ItemCategory.TOOL: "ツール",
+    ItemCategory.MA_EXTENSION: "MA拡張",
+    ItemCategory.SHADER_EXTENSION: "シェーダー拡張",
+    ItemCategory.OTHER: "その他",
+}
+CATEGORY_OPTIONS: list[tuple[str, str]] = [(c.value, label) for c, label in CATEGORY_LABELS.items()]
 
 
 @dataclass(slots=True)
@@ -77,6 +92,7 @@ def _to_read(item: Item) -> ItemRead:
     return ItemRead(
         id=item.id,
         name=item.name,
+        category=item.category,
         shop_name=item.shop.name if item.shop else None,
         status_label=item.status.label if item.status else None,
         file_format=item.file_format,
@@ -91,6 +107,8 @@ def _to_list_row(item: Item) -> ItemListRow:
     return ItemListRow(
         id=item.id,
         name=item.name,
+        category=item.category,
+        category_label=CATEGORY_LABELS[item.category],
         shop_name=item.shop.name if item.shop else None,
         status_label=item.status.label if item.status else None,
         file_format=item.file_format,
@@ -101,6 +119,11 @@ def _to_list_row(item: Item) -> ItemListRow:
         tags=sorted(t.name for t in item.tags),
         avatars=sorted(a.name for a in item.avatars),
         file_status=_file_status(item.primary_file),
+        primary_file_name=item.primary_file.original_filename if item.primary_file else None,
+        attachment_files=[
+            ItemFileRead(id=f.id, original_filename=f.original_filename, size_bytes=f.size_bytes)
+            for f in item.attachment_files
+        ],
     )
 
 
@@ -110,6 +133,8 @@ def _to_detail(item: Item) -> ItemDetail:
     return ItemDetail(
         id=item.id,
         name=item.name,
+        category=item.category,
+        category_label=CATEGORY_LABELS[item.category],
         shop_id=item.shop_id,
         shop_name=item.shop.name if item.shop else None,
         shop_url=item.shop.url if item.shop else None,
@@ -134,6 +159,11 @@ def _to_detail(item: Item) -> ItemDetail:
         redistribution_allowed=license_.redistribution_allowed if license_ else TriState.UNKNOWN,
         credit_required=license_.credit_required if license_ else TriState.UNKNOWN,
         license_note=license_.note if license_ else None,
+        primary_file_name=item.primary_file.original_filename if item.primary_file else None,
+        attachment_files=[
+            ItemFileRead(id=f.id, original_filename=f.original_filename, size_bytes=f.size_bytes)
+            for f in item.attachment_files
+        ],
         update_history=[UpdateHistoryRead(id=h.id, checked_at=h.checked_at, note=h.note) for h in history],
     )
 
@@ -160,6 +190,8 @@ def search_items(db: Session, filters: ItemSearchFilters) -> list[ItemListRow]:
         stmt = stmt.where(Item.shop_id == filters.shop_id)
     if filters.status_code:
         stmt = stmt.where(Item.status.has(Status.code == filters.status_code))
+    if filters.category:
+        stmt = stmt.where(Item.category == filters.category)
     if filters.favorites_only:
         stmt = stmt.where(Item.is_favorite.is_(True))
     if filters.tags:
@@ -269,6 +301,7 @@ def update_item(
 
     item.shop = shop
     item.name = data.name
+    item.category = data.category
     item.product_url = data.product_url
     item.download_source_url = data.download_source_url
     item.purchase_date = data.purchase_date
@@ -300,6 +333,91 @@ def update_item(
     drive_sync_service.mark_dirty()
     logger.info("item updated id=%s", item.id)
     return _to_read(item)
+
+
+def find_duplicate_product_url_item(db: Session, product_url: str, *, exclude_item_id: int) -> Item | None:
+    """The other item (if any) already linked to this exact BOOTH URL --
+    used to offer a merge instead of silently letting two items point at
+    the same product (see merge_item_into and the edit panel's confirm
+    prompt)."""
+    return db.execute(
+        select(Item).where(Item.product_url == product_url, Item.id != exclude_item_id)
+    ).scalars().first()
+
+
+def merge_item_into(db: Session, source_item_id: int, target_item_id: int) -> ItemRead:
+    """Moves every file from `source_item_id` onto `target_item_id` (as
+    ATTACHMENT files -- target keeps its own PRIMARY/THUMBNAIL) and deletes
+    the now-empty source item. Used when two separately-uploaded files
+    turn out to link to the same BOOTH product: rather than leaving two
+    library entries for one purchase, the newer upload's file(s) join the
+    existing entry instead.
+
+    Best-effort on Drive content, same as delete_item: a synced source file
+    is re-parented in place (still the same Drive object, just a different
+    DB owner) so nothing needs to be re-uploaded; only a redundant second
+    thumbnail is actually deleted.
+    """
+    source = db.get(Item, source_item_id)
+    target = db.get(Item, target_item_id)
+    if source is None:
+        raise NotFoundError("Item", source_item_id)
+    if target is None:
+        raise NotFoundError("Item", target_item_id)
+
+    for file in list(source.files):
+        if file.file_role == FileRole.THUMBNAIL:
+            if target.thumbnail_file is not None:
+                _delete_file_content(db, file, None)
+                source.files.remove(file)
+                db.delete(file)
+                continue
+        else:
+            file.file_role = FileRole.ATTACHMENT
+        # Re-parenting must go through the relationship collections, not
+        # just file.item_id -- source.files has cascade="all, delete-orphan"
+        # (see Item.files), which cascades from the *collection membership*
+        # at flush time, not the raw foreign key value. Setting item_id
+        # alone leaves `file` still logically inside source.files, so the
+        # db.delete(source) below would delete it right along with source
+        # regardless of what item_id says.
+        source.files.remove(file)
+        target.files.append(file)
+
+    db.delete(source)
+    db.commit()
+    db.refresh(target)
+    drive_sync_service.mark_dirty()
+    logger.info("merged item id=%s into id=%s", source_item_id, target_item_id)
+    return _to_read(target)
+
+
+def auto_merge_duplicate_products(db: Session) -> int:
+    """Retroactively merges any items that already share a BOOTH URL (from
+    before this app tracked/prevented that, or from Drive-side reconcile
+    importing the same product twice) -- called periodically, see
+    item_dedup_service.merge_loop. The earliest-created item in each group
+    is kept as the target; every other item's files are folded into it.
+    Returns the number of items merged away. See merge_loop for the
+    periodic background sweep that calls this automatically.
+    """
+    duplicate_urls = db.execute(
+        select(Item.product_url)
+        .where(Item.product_url.is_not(None))
+        .group_by(Item.product_url)
+        .having(func.count(Item.id) > 1)
+    ).scalars().all()
+
+    merged = 0
+    for url in duplicate_urls:
+        items = db.execute(
+            select(Item).where(Item.product_url == url).order_by(Item.created_at.asc(), Item.id.asc())
+        ).scalars().all()
+        target, *duplicates = items
+        for dup in duplicates:
+            merge_item_into(db, dup.id, target.id)
+            merged += 1
+    return merged
 
 
 def delete_item(db: Session, item_id: int, *, drive_client: DriveClient | None = None) -> None:
@@ -442,6 +560,7 @@ def create_item_with_file(
             item = Item(
                 shop=shop,
                 name=data.name,
+                category=data.category,
                 product_url=data.product_url,
                 download_source_url=data.download_source_url,
                 purchase_date=data.purchase_date,
@@ -526,3 +645,32 @@ def create_item_with_file(
 
     logger.info("item created id=%s name=%s", item.id, item.name)
     return _to_read(item)
+
+
+_MERGE_INTERVAL_SECONDS = 10 * 60
+
+
+def _auto_merge_now_blocking() -> None:
+    session_local = get_sessionmaker()
+    with session_local() as db:
+        try:
+            merged = auto_merge_duplicate_products(db)
+            if merged:
+                logger.info("periodic dedup sweep merged %d duplicate item(s)", merged)
+        except Exception:
+            logger.exception("periodic dedup sweep failed")
+
+
+async def merge_loop(stop_event: asyncio.Event) -> None:
+    """Periodic fallback for auto_merge_duplicate_products -- catches
+    duplicates the interactive confirm-merge flow (edit panel) didn't
+    handle, e.g. two items uploaded before either was linked to BOOTH, or
+    ones Drive-side reconcile imported separately."""
+    while not stop_event.is_set():
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=_MERGE_INTERVAL_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+        if stop_event.is_set():
+            break
+        await asyncio.to_thread(_auto_merge_now_blocking)

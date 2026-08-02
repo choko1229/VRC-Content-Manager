@@ -19,10 +19,15 @@
   <img src="/items/{{ item.id }}/thumbnail" alt="{{ item.name }}のサムネイル画像" class="w-full rounded-2xl border border-white/60 dark:border-white/10 shadow-md mb-4 object-cover aspect-square">
   {% endif %}
 
-  <div class="flex flex-wrap gap-2 mb-5">
+  <div class="flex flex-wrap gap-2 mb-{% if item.attachment_files %}3{% else %}5{% endif %}">
     {{ ui.btn("編集", variant="secondary", icon="edit", type="button", extra="flex-1",
         attrs='hx-get="/fragments/items/' ~ item.id ~ '/edit" hx-target="#detail-panel" hx-swap="innerHTML"') }}
-    {{ ui.btn("DL", variant="primary", icon="download", href="/api/v1/items/" ~ item.id ~ "/download", extra="flex-1") }}
+    {% if not item.attachment_files %}
+    <a href="/api/v1/items/{{ item.id }}/download" title="{{ item.primary_file_name or '' }}"
+       class="flex-1 inline-flex items-center justify-center gap-2 min-h-11 min-w-11 px-5 rounded-full font-semibold text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 bg-accent dark:bg-accent-dark text-white dark:text-slate-950 shadow-md shadow-accent/30 hover:brightness-95 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+      <span class="icon text-[1.15rem]" aria-hidden="true">download</span>DL
+    </a>
+    {% endif %}
     <button type="button"
             hx-delete="/fragments/items/{{ item.id }}"
             hx-target="#detail-panel"
@@ -30,12 +35,32 @@
             hx-push-url="/items"
             hx-confirm="「{{ item.name }}」を削除しますか？Drive上のファイルも削除され、この操作は取り消せません。"
             hx-on::after-request="if(event.detail.successful){ var f = document.getElementById('filter-form'); if (f) htmx.trigger(f, 'submit'); }"
-            class="w-full inline-flex items-center justify-center gap-2 min-h-11 px-5 rounded-full font-semibold text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 bg-white/70 dark:bg-white/10 border border-danger/60 dark:border-danger-dark/60 text-danger dark:text-danger-dark backdrop-blur hover:bg-danger hover:text-white dark:hover:bg-danger-dark dark:hover:text-slate-950 focus-visible:outline-danger dark:focus-visible:outline-danger-dark">
+            class="{% if item.attachment_files %}w-full{% endif %} inline-flex items-center justify-center gap-2 min-h-11 px-5 rounded-full font-semibold text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 bg-white/70 dark:bg-white/10 border border-danger/60 dark:border-danger-dark/60 text-danger dark:text-danger-dark backdrop-blur hover:bg-danger hover:text-white dark:hover:bg-danger-dark dark:hover:text-slate-950 focus-visible:outline-danger dark:focus-visible:outline-danger-dark">
       <span class="icon text-[1.15rem]" aria-hidden="true">delete</span>削除
     </button>
   </div>
 
+  {% if item.attachment_files %}
+  {# Grouped via a shared BoothURL (see item_service.merge_item_into) -- one
+     DL button per file since a single "DL" wouldn't say which it grabs. #}
+  <div class="space-y-1.5 mb-5">
+    <a href="/api/v1/items/{{ item.id }}/download" title="{{ item.primary_file_name or '' }}"
+       class="flex items-center justify-between gap-2 min-h-9 px-3 rounded-xl text-sm bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 transition">
+      <span class="truncate">{{ item.primary_file_name }}</span>
+      <span class="icon text-[1.1rem] shrink-0" aria-hidden="true">download</span>
+    </a>
+    {% for f in item.attachment_files %}
+    <a href="/api/v1/items/{{ item.id }}/files/{{ f.id }}/download" title="{{ f.original_filename }}"
+       class="flex items-center justify-between gap-2 min-h-9 px-3 rounded-xl text-sm bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 transition">
+      <span class="truncate">{{ f.original_filename }}</span>
+      <span class="icon text-[1.1rem] shrink-0" aria-hidden="true">download</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <dl class="grid gap-x-4 gap-y-3 text-sm mb-5">
+    <div><dt class="text-slate-500 dark:text-slate-400">種別</dt><dd class="font-medium">{{ item.category_label }}</dd></div>
     <div><dt class="text-slate-500 dark:text-slate-400">ショップ</dt><dd class="font-medium">{{ item.shop_name or "-" }}{% if item.shop_url %} (<a href="{{ item.shop_url }}" target="_blank" rel="noopener noreferrer" class="text-accent dark:text-accent-dark hover:underline">リンク<span class="sr-only">(新しいタブで開く)</span></a>){% endif %}</dd></div>
     {% if item.description %}<div><dt class="text-slate-500 dark:text-slate-400">説明</dt><dd class="font-medium whitespace-pre-wrap">{{ item.description }}</dd></div>{% endif %}
     <div><dt class="text-slate-500 dark:text-slate-400">商品ページ</dt><dd class="font-medium truncate">{% if item.product_url %}<a href="{{ item.product_url }}" target="_blank" rel="noopener noreferrer" class="text-accent dark:text-accent-dark hover:underline">{{ item.product_url }}<span class="sr-only">(新しいタブで開く)</span></a>{% else %}-{% endif %}</dd></div>

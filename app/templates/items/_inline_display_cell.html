@@ -1,0 +1,9 @@
+{# Table view's タグ/対応アバター cells, double-click to edit (see
+   app/web/fragments/items.py: inline_edit_cell_fragment /
+   submit_inline_edit_cell_fragment). hx-on:click stops the row's own
+   hx-get (which navigates to the item detail) from firing on a click
+   inside this cell -- otherwise the two clicks of a double-click would
+   navigate away before the edit form even has a chance to open. #}
+<td class="px-4 py-3" hx-get="/fragments/items/{{ item_id }}/inline-edit/{{ field }}"
+    hx-trigger="dblclick" hx-target="this" hx-swap="outerHTML" hx-on:click="event.stopPropagation()"
+    title="ダブルクリックで編集">{{ values | join(", ") }}</td>

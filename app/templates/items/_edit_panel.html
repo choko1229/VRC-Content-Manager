@@ -3,17 +3,30 @@
   <div class="flex items-start justify-between gap-2 mb-4">
     <h2 class="flex items-center gap-1.5 text-lg font-medium text-slate-900 dark:text-white min-w-0">
       <span class="icon text-accent dark:text-accent-dark text-[1.1rem]" aria-hidden="true">edit</span>
-      <span class="truncate">{{ item_name }}を編集</span>
+      <span id="edit-panel-title-text" class="truncate">{{ item_name }}</span>を編集
     </h2>
     <button type="button" hx-get="/items/{{ item_id }}" hx-target="#detail-panel" hx-swap="innerHTML"
-            class="shrink-0 inline-flex items-center justify-center min-h-9 min-w-9 w-9 h-9 rounded-full text-slate-500 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-white/10 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark" aria-label="キャンセル">
+            class="shrink-0 inline-flex items-center justify-center min-h-9 min-w-9 w-9 h-9 rounded-full text-slate-500 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-white/10 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark" aria-label="閉じる">
       <span class="icon" aria-hidden="true">close</span>
     </button>
   </div>
 
   {% if error %}{{ ui.alert(error, variant="error") }}{% endif %}
 
-  <form hx-post="/fragments/items/{{ item_id }}/edit" hx-target="#detail-panel" hx-swap="innerHTML" hx-encoding="multipart/form-data" class="space-y-5">
+  <p class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-3" role="status">
+    <span class="icon text-[0.95rem]" aria-hidden="true">cloud_done</span>
+    <span id="autosave-status">項目を編集すると自動的に保存されます</span>
+  </p>
+
+  {# Auto-save: no submit button -- the form posts on every focusout (a
+     field losing focus), and again immediately after a thumbnail file is
+     picked (file inputs have no meaningful focusout of their own). Uses
+     hx-swap="none" so a save round-trip never touches the form's own DOM --
+     see items/_autosave_status.html and the script block below for how the
+     handful of things that DO need to reflect a save (title, thumbnail,
+     status text) get updated out-of-band instead. #}
+  <form id="edit-form" hx-post="/fragments/items/{{ item_id }}/edit" hx-trigger="focusout, change from:#f-thumbnail"
+        hx-target="this" hx-swap="none" hx-encoding="multipart/form-data" class="space-y-5">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 
     {{ ui.text_field("product_url", "BoothURL", type="url", value=form_values.get('product_url', ''),
@@ -29,12 +42,16 @@
        (see items/_fetch_info_result.html's OOB clear on a successful
        fetch), so it never re-fetches on every subsequent edit. #}
     {# hx-target="this" is required here, not optional: the enclosing
-       <form> above sets hx-target="#detail-panel" for its own submit, and
+       <form> above sets hx-target="this" (itself) for its own submit, and
        hx-target inherits down to descendants that don't set their own --
-       without this, this element's response would replace the entire
-       detail panel (form and all) instead of just this div. #}
+       without this, this element's response would replace the form itself
+       instead of just this div. #}
     <div id="booth-suggestions" {% if not form_values.get('product_url') %}hx-get="/fragments/items/booth-search?q={{ item_name | urlencode }}" hx-trigger="load" hx-target="this" hx-swap="outerHTML"{% endif %}></div>
     <div id="fetch-info-result" aria-live="polite"></div>
+    {# Populated via OOB swap when a save's BoothURL matches another item's
+       (see items/_duplicate_confirm.html) -- empty until then, and cleared
+       again by every subsequent _autosave_status.html response. #}
+    <div id="duplicate-confirm" aria-live="polite"></div>
 
     <div>
       {{ ui.label_for("f-thumbnail", "サムネイル") }}
@@ -46,6 +63,13 @@
     </div>
 
     {{ ui.text_field("name", "タイトル", required=True, value=form_values.get('name', '')) }}
+
+    {# field_id overrides the default "f-category" id, which collides with
+       the item-list filter form's own category dropdown (same field name,
+       different form) -- without this, document.getElementById("f-category")
+       from anywhere on the page would resolve to whichever one appears
+       first in the DOM instead of this one. #}
+    {{ ui.select_field("category", "種別", category_options, selected=form_values.get('category', 'clothing'), field_id="f-edit-category") }}
 
     {{ ui.combobox_field("shop_name", "ショップ名", shops, required=True, value=form_values.get('shop_name', '')) }}
 
@@ -69,9 +93,8 @@
 
     {{ ui.textarea_field("memo", "メモ", value=form_values.get('memo', ''), rows=3) }}
 
-    <div class="flex gap-2 pt-1">
-      {{ ui.btn("保存", variant="primary", icon="save", type="submit", extra="flex-1") }}
-      {{ ui.btn("キャンセル", variant="secondary", type="button", extra="flex-1", attrs='hx-get="/items/' ~ item_id ~ '" hx-target="#detail-panel" hx-swap="innerHTML"') }}
+    <div class="pt-1">
+      {{ ui.btn("閉じる", variant="secondary", type="button", extra="w-full", attrs='hx-get="/items/' ~ item_id ~ '" hx-target="#detail-panel" hx-swap="innerHTML"') }}
     </div>
   </form>
 {% endcall %}
@@ -91,6 +114,25 @@
   var avatarFields = document.getElementById("avatar-registration-fields");
   isAvatarCheckbox.addEventListener("change", function () {
     avatarFields.classList.toggle("hidden", !isAvatarCheckbox.checked);
+  });
+
+  // htmx request-lifecycle events bubble like any DOM event -- the
+  // BoothURL field's own fetch-info lookup and the booth-suggestions
+  // auto-search both live inside this form and fire their own separate
+  // htmx requests, which would otherwise also reach these listeners.
+  // e.detail.elt is the actual element that issued the request, so this
+  // form's own submit is the only thing checked in either handler.
+  var form = document.getElementById("edit-form");
+  form.addEventListener("htmx:beforeRequest", function (e) {
+    if (e.detail.elt !== form) return;
+    document.getElementById("autosave-status").textContent = "保存中…";
+  });
+  form.addEventListener("htmx:afterRequest", function (e) {
+    if (e.detail.elt !== form) return;
+    // A file input's selected file stays in the form after a save --
+    // without clearing it, the NEXT unrelated field's focusout would
+    // resubmit (and thus re-apply) the same thumbnail file again.
+    if (e.detail.successful && input.value) input.value = "";
   });
 })();
 </script>

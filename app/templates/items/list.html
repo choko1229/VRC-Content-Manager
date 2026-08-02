@@ -8,7 +8,7 @@
 
 <div class="lg:grid lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-6 lg:items-start">
   <div class="min-w-0">
-    {% set advanced_active = filters.shop_id or filters.status_code or filters.tags or filters.avatars or filters.favorites_only %}
+    {% set advanced_active = filters.shop_id or filters.status_code or filters.category or filters.tags or filters.avatars or filters.favorites_only %}
     {% call ui.glass(extra="mb-6") %}
     <form id="filter-form" hx-get="/fragments/items" hx-target="#item-results" hx-trigger="change, submit" aria-label="商品検索・絞り込み">
       <input type="hidden" name="view" id="view-input" value="{{ view }}">
@@ -25,6 +25,7 @@
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mt-4">
           {{ ui.select_field("shop_id", "ショップ", [("", "すべて")] + shop_options, selected=filters.shop_id) }}
           {{ ui.select_field("status_code", "ステータス", [("", "すべて")] + status_options, selected=filters.status_code) }}
+          {{ ui.select_field("category", "種別", [("", "すべて")] + category_options, selected=filters.category) }}
           {{ ui.combobox_field("tags", "タグ", tag_names, value=filters.tags, placeholder="カンマ区切り", multi=True) }}
           {{ ui.combobox_field("avatars", "対応アバター", avatar_names, value=filters.avatars, placeholder="カンマ区切り", multi=True) }}
           {{ ui.checkbox_field("favorites_only", "お気に入りのみ", checked=filters.favorites_only, extra="self-end") }}
@@ -89,7 +90,7 @@
     </div>
   </div>
 
-  <aside id="detail-panel" class="mt-6 lg:mt-0 lg:sticky lg:top-20" aria-live="polite">
+  <aside id="detail-panel" class="mt-6 lg:mt-0 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto" aria-live="polite">
     {% if selected_item %}
       {% set item = selected_item %}
       {% include "items/_detail_panel.html" %}
@@ -173,6 +174,13 @@
     var form = document.getElementById("filter-form");
     if (form) htmx.trigger(form, "submit");
   }
+
+  // The sidebar edit panel auto-saves in place (hx-swap="none", so its own
+  // form is never re-rendered) and signals a successful save via the
+  // HX-Trigger response header instead -- refresh the list in the
+  // background so a renamed/retagged item is reflected there too, without
+  // disturbing the still-open edit panel.
+  document.body.addEventListener("item-saved", refreshResultsList);
 
   function upload(file) {
     var toastId = window.Toast.show({

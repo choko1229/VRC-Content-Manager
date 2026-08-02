@@ -14,12 +14,12 @@
      once per card -- a real cause of scroll jank on long lists. Blur is kept
      on surfaces that actually overlay scrolling content (header, sticky
      detail panel, toasts, dropdowns), where there's only ever one instance. #}
-  <div class="js-item group relative rounded-3xl border border-white/60 dark:border-white/10 bg-white/70 dark:bg-slate-900/60 shadow-lg shadow-slate-200/40 dark:shadow-black/20 overflow-hidden transition motion-safe:hover:shadow-xl motion-safe:hover:-translate-y-0.5"
+  <div class="js-item group relative rounded-lg border border-white/60 dark:border-white/10 bg-white/70 dark:bg-slate-900/60 shadow-lg shadow-slate-200/40 dark:shadow-black/20 overflow-hidden transition hover:bg-white/90 dark:hover:bg-slate-900/80 hover:border-accent/40 dark:hover:border-accent-dark/40"
        data-item-id="{{ item.id }}" data-item-name="{{ item.name }}">
     <a href="/items/{{ item.id }}"
        hx-get="/items/{{ item.id }}" hx-target="#detail-panel" hx-swap="innerHTML" hx-push-url="true"
-       class="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark rounded-t-3xl">
-      <div class="aspect-video flex items-center justify-center overflow-hidden {% if not item.has_thumbnail %}bg-[url('{{ placeholder_url }}')] bg-cover bg-center{% endif %}">
+       class="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark rounded-t-lg">
+      <div class="aspect-square flex items-center justify-center overflow-hidden {% if not item.has_thumbnail %}bg-[url('{{ placeholder_url }}')] bg-cover bg-center{% endif %}">
         {% if item.has_thumbnail %}
           <img src="/items/{{ item.id }}/thumbnail" alt="" class="w-full h-full object-cover">
         {% else %}
@@ -35,7 +35,10 @@
           <span class="truncate">{{ item.name }}</span>
         </div>
         <div class="text-sm text-slate-500 dark:text-slate-400 truncate">{{ item.shop_name or "" }}</div>
-        <div class="text-xs text-slate-500 dark:text-slate-400">{{ item.status_label or "" }}</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+          {{ item.status_label or "" }}
+          {% if item.category.value != "clothing" %}<span class="inline-flex items-center rounded-full bg-accent/10 dark:bg-accent-dark/10 text-accent dark:text-accent-dark px-1.5 py-0.5 text-[0.65rem] font-semibold">{{ item.category_label }}</span>{% endif %}
+        </div>
         {% if item.tags %}
         <div class="mt-2 flex flex-wrap gap-1">
           {% for t in item.tags %}{{ ui.chip(t) }}{% endfor %}
@@ -44,7 +47,30 @@
       </div>
     </a>
     <div class="px-4 pb-4">
-      {{ ui.btn("ダウンロード", variant="secondary", icon="download", href="/api/v1/items/" ~ item.id ~ "/download", extra="w-full") }}
+      {% if item.attachment_files %}
+      {# Grouped via a shared BoothURL (see item_service.merge_item_into) --
+         each file gets its own row + DL button since "ダウンロード" alone
+         wouldn't say which of several files it grabs. #}
+      <div class="space-y-1">
+        <a href="/api/v1/items/{{ item.id }}/download" title="{{ item.primary_file_name or '' }}"
+           class="flex items-center justify-between gap-2 min-h-8 px-2.5 rounded-lg text-xs bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 transition">
+          <span class="truncate">{{ item.primary_file_name }}</span>
+          <span class="icon text-[1rem] shrink-0" aria-hidden="true">download</span>
+        </a>
+        {% for f in item.attachment_files %}
+        <a href="/api/v1/items/{{ item.id }}/files/{{ f.id }}/download" title="{{ f.original_filename }}"
+           class="flex items-center justify-between gap-2 min-h-8 px-2.5 rounded-lg text-xs bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 transition">
+          <span class="truncate">{{ f.original_filename }}</span>
+          <span class="icon text-[1rem] shrink-0" aria-hidden="true">download</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <a href="/api/v1/items/{{ item.id }}/download" title="{{ item.primary_file_name or '' }}"
+         class="inline-flex items-center justify-center gap-2 min-h-11 min-w-11 w-full px-5 rounded-full font-semibold text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+        <span class="icon text-[1.15rem]" aria-hidden="true">download</span>ダウンロード
+      </a>
+      {% endif %}
     </div>
   </div>
   {% endfor %}

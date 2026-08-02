@@ -8,6 +8,7 @@
         <th scope="col" class="px-4 py-3"><span class="sr-only">お気に入り</span></th>
         <th scope="col" class="px-4 py-3"><span class="sr-only">ファイル状態</span></th>
         <th scope="col" class="px-4 py-3">商品名</th>
+        <th scope="col" class="px-4 py-3">種別</th>
         <th scope="col" class="px-4 py-3">ショップ</th>
         <th scope="col" class="px-4 py-3">ステータス</th>
         <th scope="col" class="px-4 py-3">形式</th>
@@ -27,17 +28,36 @@
         <td class="px-4 py-3 font-medium">
           <a href="/items/{{ item.id }}" class="text-accent dark:text-accent-dark hover:underline">{{ item.name }}</a>
         </td>
+        <td class="px-4 py-3">{{ item.category_label }}</td>
         <td class="px-4 py-3">{{ item.shop_name or "" }}</td>
         <td class="px-4 py-3">{{ item.status_label or "" }}</td>
         <td class="px-4 py-3">{{ item.file_format or "" }}</td>
         <td class="px-4 py-3">{{ item.price if item.price is not none else "" }}</td>
-        <td class="px-4 py-3">{{ item.tags | join(", ") }}</td>
-        <td class="px-4 py-3">{{ item.avatars | join(", ") }}</td>
+        {% with item_id = item.id, field = "tags", values = item.tags %}{% include "items/_inline_display_cell.html" %}{% endwith %}
+        {% with item_id = item.id, field = "avatars", values = item.avatars %}{% include "items/_inline_display_cell.html" %}{% endwith %}
         <td class="px-4 py-3 text-right">
-          <a href="/api/v1/items/{{ item.id }}/download" hx-on:click="event.stopPropagation()"
+          {% if item.attachment_files %}
+          {# Grouped via a shared BoothURL (see item_service.merge_item_into)
+             -- one DL button per file, filename visible (truncated + on
+             hover) since "ダウンロード" alone wouldn't say which is which. #}
+          <div class="flex flex-col items-end gap-1">
+            <a href="/api/v1/items/{{ item.id }}/download" title="{{ item.primary_file_name or '' }}" hx-on:click="event.stopPropagation()"
+               class="inline-flex items-center gap-1.5 min-h-8 px-2.5 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 transition">
+              <span class="icon text-[0.95rem] shrink-0" aria-hidden="true">download</span><span class="truncate max-w-[10rem]">{{ item.primary_file_name }}</span>
+            </a>
+            {% for f in item.attachment_files %}
+            <a href="/api/v1/items/{{ item.id }}/files/{{ f.id }}/download" title="{{ f.original_filename }}" hx-on:click="event.stopPropagation()"
+               class="inline-flex items-center gap-1.5 min-h-8 px-2.5 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 transition">
+              <span class="icon text-[0.95rem] shrink-0" aria-hidden="true">download</span><span class="truncate max-w-[10rem]">{{ f.original_filename }}</span>
+            </a>
+            {% endfor %}
+          </div>
+          {% else %}
+          <a href="/api/v1/items/{{ item.id }}/download" title="{{ item.primary_file_name or '' }}" hx-on:click="event.stopPropagation()"
              class="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
             <span class="icon text-[1rem]" aria-hidden="true">download</span><span class="sr-only">{{ item.name }}を</span>ダウンロード
           </a>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}

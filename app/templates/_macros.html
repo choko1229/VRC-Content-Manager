@@ -96,8 +96,8 @@
 </div>
 {% endmacro %}
 
-{% macro select_field(name, label, options, selected=none, required=False, help_text=none, extra="") %}
-{% set field_id = "f-" + name %}
+{% macro select_field(name, label, options, selected=none, required=False, help_text=none, extra="", field_id=none) %}
+{% set field_id = field_id or ("f-" + name) %}
 <div class="{{ extra }}">
   {{ label_for(field_id, label, required, help_text) }}
   <select id="{{ field_id }}" name="{{ name }}" {% if required %}required{% endif %} class="{{ input_classes }}">

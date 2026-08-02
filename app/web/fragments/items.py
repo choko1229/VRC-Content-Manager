@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from pydantic import ValidationError
@@ -14,6 +15,7 @@ from app.core.csrf import verify_csrf
 from app.core.exceptions import NotFoundError
 from app.core.validation import UploadValidationError
 from app.db.session import get_db
+from app.models.item import ItemCategory
 from app.schemas.item import ItemSearchFilters, ItemUpdate
 from app.services import (
     app_config_service,
@@ -112,6 +114,7 @@ def search_items_fragment(request: Request, db: Session = Depends(get_db)):
         avatars=_split_csv(params.get("avatars", "")),
         shop_id=int(params["shop_id"]) if params.get("shop_id") else None,
         status_code=params.get("status_code") or None,
+        category=ItemCategory(params["category"]) if params.get("category") else None,
         favorites_only=params.get("favorites_only") == "true",
     )
     view = params.get("view", "table")
@@ -189,6 +192,7 @@ def _edit_panel_context(
         "is_avatar": is_avatar,
         "avatar_form_values": avatar_form_values,
         "form_values": form_values,
+        "category_options": item_service.CATEGORY_OPTIONS,
         "error": error,
     }
 
@@ -203,6 +207,7 @@ def edit_item_panel_fragment(request: Request, item_id: int, db: Session = Depen
     form_values = {
         "product_url": detail.product_url or "",
         "name": detail.name,
+        "category": detail.category.value,
         "shop_name": detail.shop_name or "",
         "description": detail.description or "",
         "tags": ", ".join(detail.tags),
@@ -233,6 +238,7 @@ async def submit_edit_item_panel_fragment(
     item_id: int,
     product_url: str = Form(""),
     name: str = Form(...),
+    category: str = Form(ItemCategory.CLOTHING.value),
     shop_name: str = Form(...),
     description: str = Form(""),
     tags: str = Form(""),
@@ -241,42 +247,46 @@ async def submit_edit_item_panel_fragment(
     is_avatar: bool = Form(False),
     avatar_name: str = Form(""),
     avatar_memo: str = Form(""),
+    force_duplicate: bool = Form(False),
     thumbnail: UploadFile | None = None,
     db: Session = Depends(get_db),
 ):
+    """Auto-save: the sidebar form (items/_edit_panel.html) submits here on
+    every focusout, not a single explicit "save" click. The form itself
+    uses hx-swap="none" so a save round-trip never touches its own DOM
+    (preserving focus/scroll/typed values mid-edit) -- the response is
+    always the small OOB-only status template, and always HTTP 200 (even
+    on a validation failure) so htmx still processes those OOB updates;
+    htmx skips OOB processing on non-2xx responses by default. Only a
+    truly broken state (the item itself no longer exists) is a real error.
+    """
+
+    def _status(message: str, *, error: bool, item_name: str | None = None, thumbnail_url: str | None = None):
+        return templates.TemplateResponse(
+            request,
+            "items/_autosave_status.html",
+            {"message": message, "error": error, "item_name": item_name, "thumbnail_url": thumbnail_url},
+        )
+
     try:
         current = item_service.get_item_detail(db, item_id)
     except NotFoundError:
         raise HTTPException(status_code=404, detail="商品が見つかりません。")
 
-    form_values = {
-        "product_url": product_url,
-        "name": name,
-        "shop_name": shop_name,
-        "description": description,
-        "tags": tags,
-        "memo": memo,
-    }
-    avatar_form_values = {"name": avatar_name, "memo": avatar_memo}
-    checked_avatar_ids = set(avatars)
-
-    def _error_response(message: str, status_code_http: int = 422):
-        return templates.TemplateResponse(
-            request,
-            "items/_edit_panel.html",
-            _edit_panel_context(
-                db,
-                item_id,
-                name or current.name,
-                current.has_thumbnail,
-                form_values=form_values,
-                checked_avatar_ids=checked_avatar_ids,
-                is_avatar=is_avatar,
-                avatar_form_values=avatar_form_values,
-                error=message,
-            ),
-            status_code=status_code_http,
-        )
+    # A newly-entered (or changed) BoothURL that another item already links
+    # to offers a merge instead of silently letting two items point at the
+    # same product -- see items/_duplicate_confirm.html. force_duplicate is
+    # only ever set by that banner's own "別々のまま登録" button, bypassing
+    # this check for the one save that resolves it.
+    normalized_url = product_url or None
+    if normalized_url and normalized_url != current.product_url and not force_duplicate:
+        duplicate = item_service.find_duplicate_product_url_item(db, normalized_url, exclude_item_id=item_id)
+        if duplicate is not None:
+            return templates.TemplateResponse(
+                request,
+                "items/_duplicate_confirm.html",
+                {"item_id": item_id, "existing_item_id": duplicate.id, "existing_item_name": duplicate.name},
+            )
 
     # 対応アバター checkboxes only ever offer avatars that already exist
     # (avatar_service.list_avatar_options), so resolving by id and passing
@@ -291,6 +301,7 @@ async def submit_edit_item_panel_fragment(
     try:
         item_data = ItemUpdate(
             name=name,
+            category=ItemCategory(category),
             shop_name=shop_name,
             shop_url=current.shop_url,
             product_url=product_url or None,
@@ -311,8 +322,8 @@ async def submit_edit_item_panel_fragment(
             license_note=current.license_note,
         )
     except (ValidationError, ValueError) as exc:
-        logger.warning("item quick-edit validation failed: %s", exc)
-        return _error_response("入力内容を確認してください。")
+        logger.warning("item auto-save validation failed: %s", exc)
+        return _status("入力内容を確認してください。", error=True)
 
     settings = get_settings()
     max_upload_size_mb = app_config_service.get_max_upload_size_mb(db)
@@ -327,7 +338,7 @@ async def submit_edit_item_panel_fragment(
                     allowed_extensions=THUMBNAIL_EXTENSIONS,
                 )
             except UploadValidationError as exc:
-                return _error_response(str(exc))
+                return _status(str(exc), error=True)
 
         try:
             await run_in_threadpool(
@@ -350,9 +361,103 @@ async def submit_edit_item_panel_fragment(
             )
         except IntegrityError:
             db.rollback()
-            return _error_response("このアバター名は既に使用されています。")
+            return _status("このアバター名は既に使用されています。", error=True)
     else:
         avatar_service.unset_item_as_avatar(db, item_id)
 
-    updated_detail = item_service.get_item_detail(db, item_id)
-    return templates.TemplateResponse(request, "items/_detail_panel.html", {"item": updated_detail})
+    thumbnail_url = f"/items/{item_id}/thumbnail?v={uuid4().hex}" if thumbnail_upload is not None else None
+    response = _status("保存しました", error=False, item_name=name, thumbnail_url=thumbnail_url)
+    # Background-refreshes the item list (#item-results) so a renamed/
+    # retagged item is reflected there without disturbing the still-open
+    # edit panel -- see list.html's "item-saved" listener.
+    response.headers["HX-Trigger"] = "item-saved"
+    return response
+
+
+@router.post("/{item_id}/merge-into/{target_item_id}", dependencies=[Depends(verify_csrf)])
+def merge_item_into_fragment(
+    request: Request, item_id: int, target_item_id: int, db: Session = Depends(get_db)
+):
+    """Resolves the items/_duplicate_confirm.html "統合する" action: folds
+    item_id's file(s) onto target_item_id and drops item_id, then swaps the
+    whole detail panel over to the merged (target) item -- unlike the
+    auto-save route above, this one intentionally replaces the edit panel
+    entirely, since the item being edited no longer exists afterward."""
+    try:
+        item_service.merge_item_into(db, item_id, target_item_id)
+        detail = item_service.get_item_detail(db, target_item_id)
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="商品が見つかりません。")
+    response = templates.TemplateResponse(request, "items/_detail_panel.html", {"item": detail})
+    response.headers["HX-Trigger"] = "item-saved"
+    return response
+
+
+_INLINE_EDIT_FIELDS = {"tags", "avatars"}
+
+
+@router.get("/{item_id}/inline-edit/{field}")
+def inline_edit_cell_fragment(request: Request, item_id: int, field: str, db: Session = Depends(get_db)):
+    """Table view's タグ/対応アバター cells (see items/_results_table.html)
+    double-click into this -- a compact combobox scoped to just that one
+    cell, saved on blur via submit_inline_edit_cell_fragment below."""
+    if field not in _INLINE_EDIT_FIELDS:
+        raise HTTPException(status_code=404)
+    try:
+        detail = item_service.get_item_detail(db, item_id)
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="商品が見つかりません。")
+
+    current_values = detail.tags if field == "tags" else detail.avatars
+    options = (
+        tag_service.list_tag_names(db)
+        if field == "tags"
+        else [a.name for a in avatar_service.list_avatar_options(db)]
+    )
+    return templates.TemplateResponse(
+        request,
+        "items/_inline_edit_cell.html",
+        {"item_id": item_id, "field": field, "options": options, "value": ", ".join(current_values)},
+    )
+
+
+@router.post("/{item_id}/inline-edit/{field}", dependencies=[Depends(verify_csrf)])
+def submit_inline_edit_cell_fragment(
+    request: Request, item_id: int, field: str, value: str = Form(""), db: Session = Depends(get_db)
+):
+    if field not in _INLINE_EDIT_FIELDS:
+        raise HTTPException(status_code=404)
+    try:
+        current = item_service.get_item_detail(db, item_id)
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="商品が見つかりません。")
+
+    # Only this one field is user-editable here; everything else carries
+    # over unchanged, same approach as the sidebar auto-save route above.
+    item_data = ItemUpdate(
+        name=current.name,
+        category=current.category,
+        shop_name=current.shop_name or "未設定",
+        shop_url=current.shop_url,
+        product_url=current.product_url,
+        download_source_url=current.download_source_url,
+        purchase_date=current.purchase_date,
+        download_date=current.download_date,
+        price=current.price,
+        status_code=current.status_code,
+        description=current.description,
+        memo=current.memo,
+        is_favorite=current.is_favorite,
+        tags=_split_csv(value) if field == "tags" else current.tags,
+        avatars=_split_csv(value) if field == "avatars" else current.avatars,
+        commercial_use=current.commercial_use,
+        modification_allowed=current.modification_allowed,
+        redistribution_allowed=current.redistribution_allowed,
+        credit_required=current.credit_required,
+        license_note=current.license_note,
+    )
+    updated = item_service.update_item(db, item_id, item_data)
+    values = updated.tags if field == "tags" else updated.avatars
+    return templates.TemplateResponse(
+        request, "items/_inline_display_cell.html", {"item_id": item_id, "field": field, "values": values}
+    )

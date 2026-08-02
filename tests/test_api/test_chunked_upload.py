@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.drive.fake_drive_client import FakeDriveClient
 from app.main import app
-from app.services import item_service, oauth_service
+from app.services import item_service, oauth_service, upload_sync_service
 
 
 @pytest.fixture()
@@ -78,7 +78,15 @@ def test_chunked_upload_full_flow_creates_item(client) -> None:
     assert detail.shop_name == "未設定"
 
 
-def test_chunked_upload_reassembled_content_matches_original(client) -> None:
+def test_chunked_upload_reassembled_content_matches_original(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The complete route fires a background sync (asyncio.create_task) after
+    # returning -- on a real fake_client that would race the download request
+    # below (a different session might observe synced_at flip mid-request,
+    # non-deterministically). Disabling it here keeps this test about
+    # reassembly correctness, not that unrelated timing.
+    monkeypatch.setattr(upload_sync_service, "sync_pending_now", lambda: 0)
     test_client, db = client
     token = _meta_csrf_token(test_client.get("/items").text)
     content = b"PK\x03\x04" + (b"abcdefghij" * 5)

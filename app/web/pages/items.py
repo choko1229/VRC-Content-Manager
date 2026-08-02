@@ -16,7 +16,7 @@ from app.core.csrf import verify_csrf
 from app.core.exceptions import DriveError, NotFoundError
 from app.core.validation import DEFAULT_ALLOWED_EXTENSIONS, UploadValidationError
 from app.db.session import get_db
-from app.models.item import Item
+from app.models.item import Item, ItemCategory
 from app.models.status import Status
 from app.schemas.item import ItemCreate, ItemRead, ItemSearchFilters
 from app.services import (
@@ -55,6 +55,7 @@ def _items_list_context(
         avatars=_split_csv(params.get("avatars", "")),
         shop_id=int(params["shop_id"]) if params.get("shop_id") else None,
         status_code=params.get("status_code") or None,
+        category=ItemCategory(params["category"]) if params.get("category") else None,
         favorites_only=params.get("favorites_only") == "true",
     )
     items = item_service.search_items(db, filters)
@@ -66,6 +67,7 @@ def _items_list_context(
         "view": view,
         "shop_options": [(str(s.id), s.name) for s in shops],
         "status_options": [(s.code, s.label) for s in statuses],
+        "category_options": item_service.CATEGORY_OPTIONS,
         "tag_names": tag_service.list_tag_names(db),
         "avatar_names": avatar_service.list_avatar_names(db),
         "filters": {
@@ -74,6 +76,7 @@ def _items_list_context(
             "avatars": params.get("avatars", ""),
             "shop_id": params.get("shop_id", ""),
             "status_code": params.get("status_code", ""),
+            "category": params.get("category", ""),
             "favorites_only": params.get("favorites_only") == "true",
         },
         "selected_item": selected_item,

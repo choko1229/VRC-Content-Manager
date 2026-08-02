@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.item import ItemCategory
 from app.models.license import TriState
 
 # pending: primary file cached locally, not yet pushed to Drive (red)
@@ -17,6 +18,7 @@ class ItemCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=255)
+    category: ItemCategory = ItemCategory.CLOTHING
     shop_name: str = Field(min_length=1, max_length=255)
     shop_url: str | None = Field(default=None, max_length=1024)
     product_url: str | None = Field(default=None, max_length=1024)
@@ -40,6 +42,7 @@ class ItemCreate(BaseModel):
 class ItemRead(BaseModel):
     id: int
     name: str
+    category: ItemCategory
     shop_name: str | None
     status_label: str | None
     file_format: str | None
@@ -55,6 +58,7 @@ class ItemUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=255)
+    category: ItemCategory = ItemCategory.CLOTHING
     shop_name: str = Field(min_length=1, max_length=255)
     shop_url: str | None = Field(default=None, max_length=1024)
     product_url: str | None = Field(default=None, max_length=1024)
@@ -81,12 +85,21 @@ class ItemSearchFilters(BaseModel):
     avatars: list[str] = Field(default_factory=list)
     shop_id: int | None = None
     status_code: str | None = None
+    category: ItemCategory | None = None
     favorites_only: bool = False
+
+
+class ItemFileRead(BaseModel):
+    id: int
+    original_filename: str
+    size_bytes: int
 
 
 class ItemListRow(BaseModel):
     id: int
     name: str
+    category: ItemCategory
+    category_label: str
     shop_name: str | None
     status_label: str | None
     file_format: str | None
@@ -97,6 +110,8 @@ class ItemListRow(BaseModel):
     tags: list[str]
     avatars: list[str]
     file_status: FileStatus | None
+    primary_file_name: str | None
+    attachment_files: list[ItemFileRead]
 
 
 class UpdateHistoryRead(BaseModel):
@@ -108,6 +123,8 @@ class UpdateHistoryRead(BaseModel):
 class ItemDetail(BaseModel):
     id: int
     name: str
+    category: ItemCategory
+    category_label: str
     shop_id: int | None
     shop_name: str | None
     shop_url: str | None
@@ -127,6 +144,8 @@ class ItemDetail(BaseModel):
     avatars: list[str]
     avatar_registration_name: str | None
     file_status: FileStatus | None
+    primary_file_name: str | None
+    attachment_files: list[ItemFileRead]
     commercial_use: TriState
     modification_allowed: TriState
     redistribution_allowed: TriState
