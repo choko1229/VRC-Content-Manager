@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,16 @@ from app.models.item import Item
 from app.schemas.item import ItemCreate
 from app.services import drive_reconcile_service, item_service, oauth_service
 from app.services.upload_service import ValidatedUpload
+
+_PAST_GRACE_PERIOD = drive_reconcile_service._BROKEN_REFERENCE_GRACE_PERIOD + timedelta(minutes=1)
+
+
+def _backdate_sync(session: Session, item: Item) -> None:
+    """Push a file's synced_at outside the broken-reference grace period, so
+    reconcile() will actually consider it eligible for removal."""
+    for file in item.files:
+        file.synced_at = datetime.now(timezone.utc) - _PAST_GRACE_PERIOD
+    session.commit()
 
 
 def _make_upload(tmp_path: Path, name: str, content: bytes = b"dummy") -> ValidatedUpload:
@@ -32,6 +43,7 @@ def test_reconcile_removes_item_file_deleted_directly_on_drive(app_db_session: S
     )
     item = app_db_session.get(Item, created.id)
     drive_file_id = item.files[0].drive_file_id
+    _backdate_sync(app_db_session, item)  # outrun the broken-reference grace period
 
     # Simulate a manual delete directly in Drive, bypassing the app.
     del fake_client._files[drive_file_id]
@@ -43,6 +55,31 @@ def test_reconcile_removes_item_file_deleted_directly_on_drive(app_db_session: S
     refreshed = app_db_session.get(Item, created.id)
     assert refreshed is not None  # the item itself survives
     assert refreshed.files == []  # just the stale file reference is gone
+
+
+def test_reconcile_does_not_remove_recently_synced_broken_reference(
+    app_db_session: Session, tmp_path: Path
+) -> None:
+    # A file synced moments ago must survive even if it fails the Drive
+    # existence check right now -- a fresh import (or a transient Drive
+    # hiccup right after one) shouldn't be able to nuke the DB's only
+    # reference to a file that's still sitting untouched on Drive.
+    fake_client = FakeDriveClient()
+    created = item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(name="Just Synced", shop_name="Shop"),
+        primary_upload=_make_upload(tmp_path, "asset.zip"),
+        drive_client=fake_client,
+    )
+    item = app_db_session.get(Item, created.id)
+    drive_file_id = item.files[0].drive_file_id
+    del fake_client._files[drive_file_id]  # would look "broken" if checked right now
+
+    result = drive_reconcile_service.reconcile(app_db_session, fake_client)
+
+    assert result.removed_broken_files == 0
+    refreshed = app_db_session.get(Item, created.id)
+    assert len(refreshed.files) == 1
 
 
 def test_reconcile_leaves_pending_unsynced_item_alone(app_db_session: Session, tmp_path: Path) -> None:
@@ -126,6 +163,38 @@ def test_reconcile_imports_orphan_file_left_directly_in_file_folder(app_db_sessi
     assert len(items) == 1
     assert items[0].name == "orphaned"
     assert items[0].files[0].drive_folder_id == file_folder_id
+
+
+def test_reconcile_import_of_one_file_surviving_another_files_failure(
+    app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # One file blowing up in an unexpected way (not just a Drive move
+    # failure, which _move_and_attach already tolerates) must not discard
+    # every other file already successfully imported in the same sweep.
+    fake_client = FakeDriveClient()
+    upload_id = folder_layout.ensure_upload_folder(fake_client)
+    for name in ("good.zip", "poison.zip"):
+        path = tmp_path / name
+        path.write_bytes(b"zip bytes")
+        fake_client.upload_file(local_path=path, name=name, parent_id=upload_id, mime_type="application/zip")
+
+    real_move_and_attach = drive_reconcile_service._move_and_attach
+
+    def _flaky_move_and_attach(db, drive_client, item_id, role, drive_file, old_parent_id, new_parent_id):
+        if drive_file.name == "poison.zip":
+            raise RuntimeError("boom")
+        return real_move_and_attach(db, drive_client, item_id, role, drive_file, old_parent_id, new_parent_id)
+
+    monkeypatch.setattr(drive_reconcile_service, "_move_and_attach", _flaky_move_and_attach)
+
+    result = drive_reconcile_service.reconcile(app_db_session, fake_client)
+
+    assert result.imported_items == 1
+    items = app_db_session.execute(select(Item)).scalars().all()
+    assert [i.name for i in items] == ["good"]
+    # the poisoned file is untouched on Drive and will be retried next run
+    remaining = {f.name for f in fake_client.list_folder(upload_id)}
+    assert "poison.zip" in remaining
 
 
 def test_reconcile_pairs_sibling_image_as_thumbnail(app_db_session: Session, tmp_path: Path) -> None:

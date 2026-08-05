@@ -27,6 +27,19 @@ Google Drive is treated as the source of truth for *which files exist*:
 Root/upload/file folders are resolved via get_or_create_folder, which
 transparently recreates them if deleted directly in Drive -- no
 special-cased "was it deleted?" branch needed here.
+
+Each item/file processed by the import, migrate, and broken-reference sweeps
+is committed (or rolled back) independently rather than batching a whole
+sweep into one commit -- one bad file (an unexpected exception, a Drive call
+that fails in a new way) can then never silently discard every other file's
+already-successful work from the same run, and a partial DB write is never
+left half-applied. Newly-synced references are also exempt from the
+broken-reference check for a grace period (see _BROKEN_REFERENCE_GRACE_PERIOD)
+so a file imported moments ago can't be immediately re-verified and dropped
+by a transient Drive hiccup (a concurrent OAuth token refresh, a brief
+network error) before it's ever had a real chance to resolve -- losing the
+DB's only reference to it while the file itself is still sitting untouched
+on Drive.
 """
 
 from __future__ import annotations
@@ -34,7 +47,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -62,6 +75,13 @@ _UNASSIGNED_SHOP_NAME = "未設定"
 # up automatically, without needing the manual "reconcile now" button on
 # /settings for every single one.
 _RECONCILE_INTERVAL_SECONDS = 300
+
+# A reference is only ever treated as "broken" (and its file dropped) once
+# it's been synced for at least this long. Protects a file imported earlier
+# in this exact reconcile() call (or by a very recent previous run) from
+# being immediately re-verified and wrongly deleted by a one-off Drive
+# hiccup -- see the module docstring.
+_BROKEN_REFERENCE_GRACE_PERIOD = timedelta(minutes=15)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,8 +133,14 @@ def reconcile(db: Session, drive_client: DriveClient) -> ReconcileResult:
 def _remove_broken_references(db: Session, drive_client: DriveClient) -> int:
     # Files still pending upload_sync_service (synced_at IS NULL, so no
     # drive_file_id yet either) haven't reached Drive yet by design -- that's
-    # not brokenness, just skip them.
-    files = db.execute(select(ItemFile).where(ItemFile.synced_at.is_not(None))).scalars().all()
+    # not brokenness, just skip them. Files synced more recently than the
+    # grace period are also skipped -- see _BROKEN_REFERENCE_GRACE_PERIOD.
+    cutoff = datetime.now(timezone.utc) - _BROKEN_REFERENCE_GRACE_PERIOD
+    files = (
+        db.execute(select(ItemFile).where(ItemFile.synced_at.is_not(None), ItemFile.synced_at < cutoff))
+        .scalars()
+        .all()
+    )
     removed = 0
     for file in files:
         try:
@@ -127,9 +153,8 @@ def _remove_broken_references(db: Session, drive_client: DriveClient) -> int:
                 file.original_filename,
             )
             db.delete(file)
+            db.commit()
             removed += 1
-    if removed:
-        db.commit()
     return removed
 
 
@@ -158,9 +183,8 @@ def _migrate_legacy_files(db: Session, drive_client: DriveClient, file_folder_id
             )
             continue
         file.drive_folder_id = file_folder_id
-        migrated += 1
-    if migrated:
         db.commit()
+        migrated += 1
     return migrated
 
 
@@ -205,21 +229,37 @@ def _import_unknown_files(
             continue
 
         for primary in primaries:
-            item = Item(
-                shop=shop,
-                name=_derive_name(primary.name),
-                file_format=_extension_of(primary.name).lstrip("."),
-                status=status,
-            )
-            db.add(item)
-            db.flush()
-
-            _move_and_attach(db, drive_client, item.id, FileRole.PRIMARY, primary, source_folder_id, file_folder_id)
-            if thumbnail is not None:
-                _move_and_attach(
-                    db, drive_client, item.id, FileRole.THUMBNAIL, thumbnail, source_folder_id, file_folder_id
+            try:
+                item = Item(
+                    shop=shop,
+                    name=_derive_name(primary.name),
+                    file_format=_extension_of(primary.name).lstrip("."),
+                    status=status,
                 )
-            db.add(License(item_id=item.id))
+                db.add(item)
+                db.flush()
+
+                _move_and_attach(
+                    db, drive_client, item.id, FileRole.PRIMARY, primary, source_folder_id, file_folder_id
+                )
+                if thumbnail is not None:
+                    _move_and_attach(
+                        db, drive_client, item.id, FileRole.THUMBNAIL, thumbnail, source_folder_id, file_folder_id
+                    )
+                db.add(License(item_id=item.id))
+                db.commit()
+            except Exception:
+                # One poisoned file (an unexpected error, not just a Drive
+                # hiccup already handled inside _move_and_attach) must not
+                # discard every other file already imported successfully in
+                # this same sweep -- roll back just this item and keep going;
+                # it'll be retried as a fresh "unknown" file next run.
+                db.rollback()
+                logger.exception(
+                    "Drive reconcile: failed to import '%s' as a new item (skipped, will retry next run)",
+                    primary.name,
+                )
+                continue
 
             imported += 1
             logger.info(
@@ -229,8 +269,6 @@ def _import_unknown_files(
                 primary.name,
             )
 
-    if imported:
-        db.commit()
     return imported
 
 

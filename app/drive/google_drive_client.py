@@ -184,8 +184,24 @@ class GoogleDriveClient:
     def move_file(self, *, file_id: str, new_parent_id: str, old_parent_id: str) -> None:
         service = self._get_service()
         try:
-            service.files().update(
-                fileId=file_id, addParents=new_parent_id, removeParents=old_parent_id, fields="id, parents"
-            ).execute()
+            result = (
+                service.files()
+                .update(fileId=file_id, addParents=new_parent_id, removeParents=old_parent_id, fields="id, parents")
+                .execute()
+            )
         except HttpError as exc:
             raise DriveError(f"failed to move Drive file {file_id}") from exc
+
+        # Google's addParents/removeParents can each partially apply (e.g. the
+        # OAuth grant covers writing the new parent but not detaching the old
+        # one for a file the app didn't create) without the API call itself
+        # raising -- verify the file actually ended up parented where
+        # intended before reporting success, so a partial move is treated the
+        # same as a failed one (caller retries later) instead of silently
+        # leaving the file re-appearing in its old location forever.
+        result_parents = result.get("parents") or []
+        if new_parent_id not in result_parents or old_parent_id in result_parents:
+            raise DriveError(
+                f"move of Drive file {file_id} into {new_parent_id} did not fully apply "
+                f"(parents now: {result_parents})"
+            )
