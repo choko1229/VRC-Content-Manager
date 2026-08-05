@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Form, Request
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.core.csrf import verify_csrf
+from app.core.exceptions import NotFoundError
 from app.db.session import get_db
-from app.services import drive_reconcile_service, drive_sync_service, integrity_service, oauth_service
+from app.services import drive_reconcile_service, drive_sync_service, integrity_service, item_service, oauth_service
 from app.web.templating import templates
 
 router = APIRouter(prefix="/fragments/settings", dependencies=[Depends(verify_csrf)])
@@ -66,3 +67,23 @@ async def drive_reconcile(request: Request, db: Session = Depends(get_db)):
             status_code=502,
         )
     return templates.TemplateResponse(request, "partials/drive_reconcile.html", {"result": result, "error": None})
+
+
+@router.post("/duplicate-files/scan")
+async def scan_duplicate_files(request: Request, db: Session = Depends(get_db)):
+    groups = await run_in_threadpool(item_service.find_duplicate_filename_groups, db)
+    return templates.TemplateResponse(
+        request, "partials/duplicate_files.html", {"groups": groups, "message": None}
+    )
+
+
+@router.post("/duplicate-files/merge")
+async def merge_duplicate_files(request: Request, item_ids: list[int] = Form(...), db: Session = Depends(get_db)):
+    try:
+        await run_in_threadpool(item_service.merge_duplicate_group, db, item_ids)
+    except NotFoundError:
+        pass  # already merged/deleted by a concurrent request -- the re-scan below reflects current state either way
+    groups = await run_in_threadpool(item_service.find_duplicate_filename_groups, db)
+    return templates.TemplateResponse(
+        request, "partials/duplicate_files.html", {"groups": groups, "message": "統合しました。"}
+    )

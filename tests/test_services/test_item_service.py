@@ -737,3 +737,65 @@ def test_auto_merge_duplicate_products_is_a_noop_when_no_duplicates(app_db_sessi
     _create_item(app_db_session, tmp_path, name="B")  # no product_url at all
 
     assert item_service.auto_merge_duplicate_products(app_db_session) == 0
+
+
+def _create_item_with_filename(db: Session, tmp_path: Path, *, item_name: str, filename: str):
+    fake_client = FakeDriveClient()
+    return item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name=item_name, shop_name="Shop"),
+        primary_upload=_make_upload(tmp_path, name=filename, extension=".zip"),
+        drive_client=fake_client,
+    )
+
+
+def test_find_duplicate_filename_item_finds_the_other_item(app_db_session: Session, tmp_path: Path) -> None:
+    a = _create_item_with_filename(app_db_session, tmp_path, item_name="A", filename="asset.zip")
+    b = _create_item_with_filename(app_db_session, tmp_path, item_name="B", filename="asset.zip")
+
+    found = item_service.find_duplicate_filename_item(app_db_session, "asset.zip", exclude_item_id=b.id)
+
+    assert found is not None
+    assert found.id == a.id
+
+
+def test_find_duplicate_filename_item_returns_none_when_unique(app_db_session: Session, tmp_path: Path) -> None:
+    a = _create_item(app_db_session, tmp_path, name="Unique Item")
+
+    found = item_service.find_duplicate_filename_item(
+        app_db_session, "Unique Item.unitypackage", exclude_item_id=a.id
+    )
+
+    assert found is None
+
+
+def test_find_duplicate_filename_groups_groups_by_primary_filename(app_db_session: Session, tmp_path: Path) -> None:
+    for item_name in ("Dup A", "Dup B", "Dup C"):
+        _create_item_with_filename(app_db_session, tmp_path, item_name=item_name, filename="same.zip")
+    _create_item(app_db_session, tmp_path, name="Unrelated")
+
+    groups = item_service.find_duplicate_filename_groups(app_db_session)
+
+    assert len(groups) == 1
+    assert [item.name for item in groups[0]] == ["Dup A", "Dup B", "Dup C"]  # oldest-first
+
+
+def test_find_duplicate_filename_groups_is_empty_when_no_duplicates(app_db_session: Session, tmp_path: Path) -> None:
+    _create_item(app_db_session, tmp_path, name="A")
+    _create_item(app_db_session, tmp_path, name="B")
+
+    assert item_service.find_duplicate_filename_groups(app_db_session) == []
+
+
+def test_merge_duplicate_group_keeps_first_and_folds_in_the_rest(app_db_session: Session, tmp_path: Path) -> None:
+    ids = [
+        _create_item_with_filename(app_db_session, tmp_path, item_name=name, filename="same.zip").id
+        for name in ("Keep This", "Fold 1", "Fold 2")
+    ]
+
+    result = item_service.merge_duplicate_group(app_db_session, ids)
+
+    assert result.id == ids[0]
+    assert app_db_session.get(Item, ids[1]) is None
+    assert app_db_session.get(Item, ids[2]) is None
+    assert len(result.attachment_files) == 2

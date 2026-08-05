@@ -182,6 +182,53 @@
   // disturbing the still-open edit panel.
   document.body.addEventListener("item-saved", refreshResultsList);
 
+  // Offers to fold a just-uploaded item into an existing one that already
+  // has a file with the exact same name -- see item_service's
+  // find_duplicate_filename_item. Purely advisory: the new item already
+  // exists either way, this only ever informs a user-confirmed merge via
+  // the same /merge-into endpoint the BoothURL duplicate flow uses.
+  function showDuplicateConfirmToast(newItemId, existingItemId, existingItemName) {
+    window.Toast.show({
+      variant: "warning",
+      title: "同じファイル名の商品が見つかりました",
+      message: "「" + existingItemName + "」に統合しますか？",
+      duration: 0,
+      actions: [
+        {
+          label: "統合する",
+          variant: "primary",
+          onClick: function (toastId) {
+            fetch("/fragments/items/" + newItemId + "/merge-into/" + existingItemId, {
+              method: "POST",
+              headers: { "X-CSRF-Token": csrfToken },
+            }).then(function (response) {
+              if (response.ok) {
+                window.Toast.update(toastId, {
+                  title: "統合しました",
+                  message: existingItemName,
+                  variant: "success",
+                  duration: 3000,
+                });
+                refreshResultsList();
+              } else {
+                window.Toast.update(toastId, {
+                  title: "統合に失敗しました",
+                  message: "時間をおいて再度お試しください。",
+                  variant: "error",
+                  duration: 6000,
+                });
+              }
+            });
+          },
+        },
+        {
+          label: "別々のまま",
+          onClick: function (toastId) { window.Toast.dismiss(toastId); },
+        },
+      ],
+    });
+  }
+
   function upload(file) {
     var toastId = window.Toast.show({
       title: "アップロード中",
@@ -270,6 +317,13 @@
         duration: 3000,
       });
       refreshResultsList();
+
+      var newItemIdMatch = finalUrl && finalUrl.pathname.match(/\/items\/(\d+)/);
+      var duplicateOf = finalUrl && finalUrl.searchParams.get("duplicate_of");
+      var duplicateName = finalUrl && finalUrl.searchParams.get("duplicate_name");
+      if (newItemIdMatch && duplicateOf) {
+        showDuplicateConfirmToast(newItemIdMatch[1], duplicateOf, duplicateName);
+      }
     });
 
     xhr.addEventListener("error", function () {
@@ -332,7 +386,7 @@
         duration: 0,
       });
 
-      await postJson("/items/new/chunked/" + init.upload_id + "/complete", {});
+      var completeResult = await postJson("/items/new/chunked/" + init.upload_id + "/complete", {});
 
       window.Toast.update(toastId, {
         title: "アップロード完了",
@@ -342,6 +396,10 @@
         duration: 3000,
       });
       refreshResultsList();
+
+      if (completeResult && completeResult.duplicate_of) {
+        showDuplicateConfirmToast(completeResult.item_id, completeResult.duplicate_of, completeResult.duplicate_name);
+      }
     } catch (err) {
       window.Toast.update(toastId, {
         title: "アップロードに失敗しました",

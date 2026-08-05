@@ -80,6 +80,39 @@ def test_quick_upload_creates_item_with_derived_name_and_redirects_to_detail(cli
     assert detail.has_thumbnail is False
 
 
+def test_quick_upload_of_a_duplicate_filename_still_creates_item_but_flags_it(client) -> None:
+    # A same-named file isn't blocked -- the new item is created either way
+    # -- but the redirect carries enough info for the client to offer a
+    # merge (see items/list.html's duplicate-confirm toast).
+    test_client, db = client
+    token = _meta_csrf_token(test_client.get("/items").text)
+    first = test_client.post(
+        "/items/new",
+        headers={"X-CSRF-Token": token},
+        files={"file": ("dup-asset.zip", b"first content", "application/zip")},
+        follow_redirects=False,
+    )
+    first_item_id = int(re.match(r"^/items/(\d+)$", first.headers["location"]).group(1))
+
+    second = test_client.post(
+        "/items/new",
+        headers={"X-CSRF-Token": token},
+        files={"file": ("dup-asset.zip", b"second content", "application/zip")},
+        follow_redirects=False,
+    )
+
+    assert second.status_code == 303
+    location = second.headers["location"]
+    match = re.match(r"^/items/(\d+)\?duplicate_of=(\d+)&duplicate_name=(.+)$", location)
+    assert match is not None
+    second_item_id, duplicate_of, _ = match.groups()
+    assert int(duplicate_of) == first_item_id
+
+    # both items exist -- the new upload was never blocked, just flagged
+    assert item_service.get_item_detail(db, int(second_item_id)).id == int(second_item_id)
+    assert item_service.get_item_detail(db, first_item_id).id == first_item_id
+
+
 def test_quick_upload_without_file_returns_error(client) -> None:
     test_client, _db = client
     token = _meta_csrf_token(test_client.get("/items").text)

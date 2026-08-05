@@ -392,6 +392,58 @@ def merge_item_into(db: Session, source_item_id: int, target_item_id: int) -> It
     return _to_read(target)
 
 
+def find_duplicate_filename_item(db: Session, filename: str, *, exclude_item_id: int) -> Item | None:
+    """The other item (if any) whose primary file has this exact original
+    filename -- used to offer a merge right after an upload instead of
+    silently creating a second entry for a file uploaded twice (unlike a
+    BoothURL match, a filename match isn't unambiguous enough to auto-merge,
+    so this only ever informs a user-confirmed merge)."""
+    return db.execute(
+        select(Item)
+        .join(ItemFile, ItemFile.item_id == Item.id)
+        .where(
+            ItemFile.file_role == FileRole.PRIMARY,
+            ItemFile.original_filename == filename,
+            Item.id != exclude_item_id,
+        )
+    ).scalars().first()
+
+
+def find_duplicate_filename_groups(db: Session) -> list[list[Item]]:
+    """Every set of 2+ items whose primary file shares an identical original
+    filename, oldest-first within each group -- surfaced on /settings so a
+    user can confirm merging items that were already uploaded twice before
+    this filename check existed (or via Drive-side reconcile picking up the
+    same dropped file more than once)."""
+    duplicate_filenames = db.execute(
+        select(ItemFile.original_filename)
+        .where(ItemFile.file_role == FileRole.PRIMARY)
+        .group_by(ItemFile.original_filename)
+        .having(func.count(ItemFile.item_id) > 1)
+    ).scalars().all()
+
+    groups = []
+    for filename in duplicate_filenames:
+        items = db.execute(
+            select(Item)
+            .join(ItemFile, ItemFile.item_id == Item.id)
+            .where(ItemFile.file_role == FileRole.PRIMARY, ItemFile.original_filename == filename)
+            .order_by(Item.created_at.asc(), Item.id.asc())
+        ).scalars().all()
+        groups.append(list(items))
+    return groups
+
+
+def merge_duplicate_group(db: Session, item_ids: list[int]) -> ItemDetail:
+    """Merges every id after the first into the first (see merge_item_into).
+    `item_ids` must already be ordered target-first -- as returned by
+    find_duplicate_filename_groups."""
+    target_id, *duplicate_ids = item_ids
+    for duplicate_id in duplicate_ids:
+        merge_item_into(db, duplicate_id, target_id)
+    return get_item_detail(db, target_id)
+
+
 def auto_merge_duplicate_products(db: Session) -> int:
     """Retroactively merges any items that already share a BOOTH URL (from
     before this app tracked/prevented that, or from Drive-side reconcile

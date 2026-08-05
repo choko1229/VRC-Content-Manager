@@ -64,6 +64,22 @@
 {% endif %}
 
 {% call ui.glass(extra="mb-6") %}
+<h2 class="text-lg font-medium mb-3">重複ファイルの検出</h2>
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-4">
+  同じファイル名で複数回登録されてしまった商品を検出します。アップロード時にはその場で統合確認が出ますが、
+  それより前に登録されたものや、確認をスキップして別々のまま登録したものはここでまとめて検出・統合できます。
+</p>
+<div id="duplicate-files-result" aria-live="polite"></div>
+<div class="flex flex-wrap items-center gap-3">
+  {{ ui.btn("検出する", variant="secondary", icon="content_copy", type="button",
+      attrs='hx-post="/fragments/settings/duplicate-files/scan" hx-target="#duplicate-files-result" hx-swap="innerHTML" hx-indicator="#duplicate-files-indicator" hx-disabled-elt="this"') }}
+  <span id="duplicate-files-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
+    <span class="icon text-[1rem] animate-spin" aria-hidden="true">progress_activity</span>検出中…
+  </span>
+</div>
+{% endcall %}
+
+{% call ui.glass(extra="mb-6") %}
 <h2 class="text-lg font-medium mb-4">ショップ管理</h2>
 <form class="grid gap-4 sm:grid-cols-3 sm:items-end mb-5" hx-post="/fragments/shops" hx-target="#shop-list" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()" aria-label="ショップ追加フォーム">
   {{ ui.text_field("name", "ショップ名", required=True) }}

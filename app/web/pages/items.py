@@ -110,10 +110,19 @@ def _derive_name_from_filename(filename: str) -> str:
     return (stem or filename.strip() or "無題の商品")[:255]
 
 
-async def _create_item_from_upload(db: Session, primary_upload: ValidatedUpload) -> ItemRead:
+async def _create_item_from_upload(db: Session, primary_upload: ValidatedUpload) -> tuple[ItemRead, Item | None]:
     """Shared by both upload paths (single-request and chunked, see
     create_item / create_item_chunked_complete below): creates the
-    minimally-populated item, then fires the background Drive push."""
+    minimally-populated item, then fires the background Drive push.
+
+    Also checks for another item whose primary file already has this exact
+    filename -- rather than silently leaving two library entries for what's
+    very likely the same product uploaded twice, the caller surfaces this
+    back to the client so it can offer a merge (see items/list.html's
+    duplicate-confirm toast and /fragments/items/{id}/merge-into/{id}).
+    A filename match isn't unambiguous enough to merge automatically, so the
+    new item is still created either way -- this is purely advisory.
+    """
     item_data = ItemCreate(
         name=_derive_name_from_filename(primary_upload.original_filename),
         shop_name=UNASSIGNED_SHOP_NAME,
@@ -126,7 +135,13 @@ async def _create_item_from_upload(db: Session, primary_upload: ValidatedUpload)
     # upload_sync_service). The periodic sweep would pick it up anyway --
     # this just makes it feel instant.
     asyncio.create_task(asyncio.to_thread(upload_sync_service.sync_pending_now))
-    return created
+    duplicate = await run_in_threadpool(
+        item_service.find_duplicate_filename_item,
+        db,
+        primary_upload.original_filename,
+        exclude_item_id=created.id,
+    )
+    return created, duplicate
 
 
 @router.post("/items/new", dependencies=[Depends(verify_csrf)])
@@ -148,11 +163,14 @@ async def create_item(file: UploadFile | None = None, db: Session = Depends(get_
         except UploadValidationError as exc:
             return _error_redirect(str(exc))
 
-        created = await _create_item_from_upload(db, primary_upload)
+        created, duplicate = await _create_item_from_upload(db, primary_upload)
     finally:
         upload_service.cleanup_upload(primary_upload)
 
-    return RedirectResponse(url=f"/items/{created.id}", status_code=303)
+    url = f"/items/{created.id}"
+    if duplicate is not None:
+        url += f"?duplicate_of={duplicate.id}&duplicate_name={quote(duplicate.name)}"
+    return RedirectResponse(url=url, status_code=303)
 
 
 # Chunked counterpart to POST /items/new above, used by the frontend for any
@@ -189,11 +207,15 @@ async def create_item_chunked_complete(upload_id: str, db: Session = Depends(get
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     try:
-        created = await _create_item_from_upload(db, primary_upload)
+        created, duplicate = await _create_item_from_upload(db, primary_upload)
     finally:
         upload_service.cleanup_upload(primary_upload)
 
-    return {"item_id": created.id}
+    response = {"item_id": created.id}
+    if duplicate is not None:
+        response["duplicate_of"] = duplicate.id
+        response["duplicate_name"] = duplicate.name
+    return response
 
 
 # Registered after the /complete route above on purpose: {chunk_index} is a
