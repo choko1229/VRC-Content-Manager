@@ -787,10 +787,13 @@ def test_find_duplicate_filename_groups_is_empty_when_no_duplicates(app_db_sessi
     assert item_service.find_duplicate_filename_groups(app_db_session) == []
 
 
-def test_merge_duplicate_group_keeps_first_and_folds_in_the_rest(app_db_session: Session, tmp_path: Path) -> None:
+def test_merge_duplicate_group_keeps_only_the_first_item(app_db_session: Session, tmp_path: Path) -> None:
+    # Unlike merge_item_into, a filename match means the extra copies are
+    # presumed redundant -- they're deleted outright, not folded in as
+    # attachments, so exactly one item (and one file) survives.
     ids = [
         _create_item_with_filename(app_db_session, tmp_path, item_name=name, filename="same.zip").id
-        for name in ("Keep This", "Fold 1", "Fold 2")
+        for name in ("Keep This", "Drop 1", "Drop 2")
     ]
 
     result = item_service.merge_duplicate_group(app_db_session, ids)
@@ -798,4 +801,5 @@ def test_merge_duplicate_group_keeps_first_and_folds_in_the_rest(app_db_session:
     assert result.id == ids[0]
     assert app_db_session.get(Item, ids[1]) is None
     assert app_db_session.get(Item, ids[2]) is None
-    assert len(result.attachment_files) == 2
+    assert result.attachment_files == []
+    assert result.primary_file_name == "same.zip"

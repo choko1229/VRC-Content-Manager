@@ -182,11 +182,14 @@
   // disturbing the still-open edit panel.
   document.body.addEventListener("item-saved", refreshResultsList);
 
-  // Offers to fold a just-uploaded item into an existing one that already
-  // has a file with the exact same name -- see item_service's
+  // Offers to drop a just-uploaded item in favor of an existing one that
+  // already has a file with the exact same name -- see item_service's
   // find_duplicate_filename_item. Purely advisory: the new item already
-  // exists either way, this only ever informs a user-confirmed merge via
-  // the same /merge-into endpoint the BoothURL duplicate flow uses.
+  // exists either way, this only ever informs a user-confirmed merge.
+  // Uses merge-duplicate-into (not the BoothURL flow's merge-into) since a
+  // filename match means the new upload is presumed a redundant copy, so
+  // it's deleted outright rather than kept as an attachment -- only one
+  // file should remain either way.
   function showDuplicateConfirmToast(newItemId, existingItemId, existingItemName) {
     window.Toast.show({
       variant: "warning",
@@ -198,7 +201,7 @@
           label: "統合する",
           variant: "primary",
           onClick: function (toastId) {
-            fetch("/fragments/items/" + newItemId + "/merge-into/" + existingItemId, {
+            fetch("/fragments/items/" + newItemId + "/merge-duplicate-into/" + existingItemId, {
               method: "POST",
               headers: { "X-CSRF-Token": csrfToken },
             }).then(function (response) {

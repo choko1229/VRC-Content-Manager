@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.drive.fake_drive_client import FakeDriveClient
 from app.main import app
@@ -111,6 +112,39 @@ def test_quick_upload_of_a_duplicate_filename_still_creates_item_but_flags_it(cl
     # both items exist -- the new upload was never blocked, just flagged
     assert item_service.get_item_detail(db, int(second_item_id)).id == int(second_item_id)
     assert item_service.get_item_detail(db, first_item_id).id == first_item_id
+
+
+def test_merge_duplicate_into_route_deletes_the_redundant_item_outright(client) -> None:
+    # Unlike /merge-into (BoothURL flow, keeps both files as attachment),
+    # this route backs the upload duplicate-confirm toast: the redundant
+    # upload is dropped entirely, not kept alongside the original.
+    test_client, db = client
+    token = _meta_csrf_token(test_client.get("/items").text)
+    first = test_client.post(
+        "/items/new",
+        headers={"X-CSRF-Token": token},
+        files={"file": ("dup-asset.zip", b"first content", "application/zip")},
+        follow_redirects=False,
+    )
+    first_item_id = int(re.match(r"^/items/(\d+)$", first.headers["location"]).group(1))
+    second = test_client.post(
+        "/items/new",
+        headers={"X-CSRF-Token": token},
+        files={"file": ("dup-asset.zip", b"second content", "application/zip")},
+        follow_redirects=False,
+    )
+    second_item_id = int(re.match(r"^/items/(\d+)\?", second.headers["location"]).group(1))
+
+    response = test_client.post(
+        f"/fragments/items/{second_item_id}/merge-duplicate-into/{first_item_id}",
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert response.status_code == 200
+    assert item_service.get_item_detail(db, first_item_id).id == first_item_id
+    assert item_service.get_item_detail(db, first_item_id).attachment_files == []
+    with pytest.raises(NotFoundError):
+        item_service.get_item_detail(db, second_item_id)
 
 
 def test_quick_upload_without_file_returns_error(client) -> None:

@@ -393,6 +393,22 @@ def merge_item_into_fragment(
     return response
 
 
+@router.post("/{item_id}/merge-duplicate-into/{target_item_id}", dependencies=[Depends(verify_csrf)])
+def merge_duplicate_filename_fragment(item_id: int, target_item_id: int, db: Session = Depends(get_db)):
+    """Resolves the upload flow's duplicate-confirm toast (items/list.html:
+    showDuplicateConfirmToast). Unlike merge_item_into above -- used for the
+    BoothURL-duplicate flow, where the two files may genuinely be worth
+    keeping both of -- a filename match means item_id's file is presumed a
+    redundant copy of target_item_id's, so it's deleted outright rather than
+    kept as an attachment (see item_service.merge_duplicate_group). Called
+    via plain fetch rather than htmx, so a bare JSON body is enough."""
+    try:
+        item_service.merge_duplicate_group(db, [target_item_id, item_id])
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="商品が見つかりません。")
+    return {"target_item_id": target_item_id}
+
+
 _INLINE_EDIT_FIELDS = {"tags", "avatars"}
 
 

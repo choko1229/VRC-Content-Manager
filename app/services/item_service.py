@@ -435,12 +435,18 @@ def find_duplicate_filename_groups(db: Session) -> list[list[Item]]:
 
 
 def merge_duplicate_group(db: Session, item_ids: list[int]) -> ItemDetail:
-    """Merges every id after the first into the first (see merge_item_into).
+    """Resolves a filename-duplicate group down to a single item: every id
+    after the first is deleted outright (its file included, best-effort on
+    Drive -- see delete_item), not folded in as an attachment. Unlike
+    merge_item_into (used for the BoothURL-duplicate flow, where the two
+    items can be genuinely different files worth keeping both of), a
+    filename match means the files are presumed to be redundant copies of
+    the very same upload, so only one file should remain in the end.
     `item_ids` must already be ordered target-first -- as returned by
     find_duplicate_filename_groups."""
     target_id, *duplicate_ids = item_ids
     for duplicate_id in duplicate_ids:
-        merge_item_into(db, duplicate_id, target_id)
+        delete_item(db, duplicate_id)
     return get_item_detail(db, target_id)
 
 
