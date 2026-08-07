@@ -1,0 +1,22 @@
+{% import "_macros.html" as ui %}
+{% if message %}
+{{ ui.alert(message, variant="success") }}
+{% endif %}
+{% if items is not none %}
+  {% if items %}
+  <p class="text-sm text-slate-600 dark:text-slate-300 mb-2">ファイルが紐付いていない商品が {{ items | length }} 件見つかりました:</p>
+  <ul class="space-y-2">
+    {% for item in items %}
+    <li class="rounded-2xl bg-white/50 dark:bg-white/5 p-3 text-sm flex items-center justify-between gap-3">
+      <a href="/items/{{ item.id }}" class="text-accent dark:text-accent-dark hover:underline min-w-0 truncate">{{ item.name }}</a>
+      <form hx-post="/fragments/settings/missing-files/delete/{{ item.id }}" hx-target="#missing-files-result" hx-swap="innerHTML"
+          hx-confirm="「{{ item.name }}」を削除しますか？元のファイル名が分かるうちに、Driveのuploadフォルダへ再度ファイルをドロップしてから削除することをおすすめします。">
+        {{ ui.btn("削除", variant="danger", type="submit", extra="text-xs min-h-8 px-3 shrink-0") }}
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  {{ ui.alert("ファイルが紐付いていない商品は見つかりませんでした。", variant="success") }}
+  {% endif %}
+{% endif %}

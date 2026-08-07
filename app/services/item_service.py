@@ -434,6 +434,20 @@ def find_duplicate_filename_groups(db: Session) -> list[list[Item]]:
     return groups
 
 
+def find_items_without_file(db: Session) -> list[Item]:
+    """Items with no PRIMARY file at all -- most often a reconcile-imported
+    item whose only file reference was later dropped by
+    drive_reconcile_service's broken-reference sweep (before its grace
+    period existed -- see that module's docstring), leaving metadata with
+    nothing left to download. Surfaced on /settings so these can be found
+    without hunting through the list by hand; this only detects the gap --
+    the original file, if it wasn't actually deleted from Drive, would need
+    to be re-dropped into `upload/` for reconcile to pick it up fresh."""
+    return db.execute(
+        select(Item).where(~Item.files.any(ItemFile.file_role == FileRole.PRIMARY)).order_by(Item.created_at.asc())
+    ).scalars().all()
+
+
 def merge_duplicate_group(db: Session, item_ids: list[int]) -> ItemDetail:
     """Resolves a filename-duplicate group down to a single item: every id
     after the first is deleted outright (its file included, best-effort on

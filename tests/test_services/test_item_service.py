@@ -787,6 +787,30 @@ def test_find_duplicate_filename_groups_is_empty_when_no_duplicates(app_db_sessi
     assert item_service.find_duplicate_filename_groups(app_db_session) == []
 
 
+def test_find_items_without_file_finds_items_missing_a_primary_file(app_db_session: Session, tmp_path: Path) -> None:
+    # Simulates the drive_reconcile_service failure mode this guards against:
+    # an item created normally, then its only file reference dropped later
+    # (e.g. by the broken-reference sweep), leaving nothing to download.
+    orphaned = _create_item(app_db_session, tmp_path, name="Orphaned")
+    item = app_db_session.get(Item, orphaned.id)
+    for file in list(item.files):
+        item.files.remove(file)
+        app_db_session.delete(file)
+    app_db_session.commit()
+    _create_item(app_db_session, tmp_path, name="Has A File")
+
+    found = item_service.find_items_without_file(app_db_session)
+
+    assert [i.id for i in found] == [orphaned.id]
+
+
+def test_find_items_without_file_is_empty_when_all_items_have_files(app_db_session: Session, tmp_path: Path) -> None:
+    _create_item(app_db_session, tmp_path, name="A")
+    _create_item(app_db_session, tmp_path, name="B")
+
+    assert item_service.find_items_without_file(app_db_session) == []
+
+
 def test_merge_duplicate_group_keeps_only_the_first_item(app_db_session: Session, tmp_path: Path) -> None:
     # Unlike merge_item_into, a filename match means the extra copies are
     # presumed redundant -- they're deleted outright, not folded in as

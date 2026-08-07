@@ -87,3 +87,21 @@ async def merge_duplicate_files(request: Request, item_ids: list[int] = Form(...
     return templates.TemplateResponse(
         request, "partials/duplicate_files.html", {"groups": groups, "message": "統合しました。"}
     )
+
+
+@router.post("/missing-files/scan")
+async def scan_missing_files(request: Request, db: Session = Depends(get_db)):
+    items = await run_in_threadpool(item_service.find_items_without_file, db)
+    return templates.TemplateResponse(request, "partials/missing_files.html", {"items": items, "message": None})
+
+
+@router.post("/missing-files/delete/{item_id}")
+async def delete_missing_file_item(request: Request, item_id: int, db: Session = Depends(get_db)):
+    try:
+        await run_in_threadpool(item_service.delete_item, db, item_id)
+    except NotFoundError:
+        pass  # already gone -- the re-scan below reflects current state either way
+    items = await run_in_threadpool(item_service.find_items_without_file, db)
+    return templates.TemplateResponse(
+        request, "partials/missing_files.html", {"items": items, "message": "削除しました。"}
+    )

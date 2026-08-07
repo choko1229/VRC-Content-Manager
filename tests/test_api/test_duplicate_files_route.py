@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.main import app
+from app.models.item import Item
 from app.schemas.item import ItemCreate
 from app.services import item_service
 from app.services.upload_service import ValidatedUpload
@@ -93,3 +94,42 @@ def test_duplicate_files_scan_and_merge_flow(client, tmp_path: Path) -> None:
     assert item_service.get_item_detail(db, ids[0]).id == ids[0]
     with pytest.raises(NotFoundError):
         item_service.get_item_detail(db, ids[1])
+
+
+def test_missing_files_scan_reports_none_when_every_item_has_a_file(client, tmp_path: Path) -> None:
+    test_client, db = client
+    _create_item(db, tmp_path, item_name="A", filename="a.zip")
+    page = test_client.get("/settings")
+    csrf_token = _extract_csrf(page.text)
+
+    response = test_client.post("/fragments/settings/missing-files/scan", headers={"X-CSRF-Token": csrf_token})
+
+    assert response.status_code == 200
+    assert "見つかりませんでした" in response.text
+
+
+def test_missing_files_scan_and_delete_flow(client, tmp_path: Path) -> None:
+    test_client, db = client
+    orphaned_id = _create_item(db, tmp_path, item_name="Orphaned Item", filename="gone.zip")
+    item = db.get(Item, orphaned_id)
+    for file in list(item.files):
+        item.files.remove(file)
+        db.delete(file)
+    db.commit()
+
+    page = test_client.get("/settings")
+    csrf_token = _extract_csrf(page.text)
+
+    scan = test_client.post("/fragments/settings/missing-files/scan", headers={"X-CSRF-Token": csrf_token})
+    assert scan.status_code == 200
+    assert "1 件見つかりました" in scan.text
+    assert "Orphaned Item" in scan.text
+
+    delete = test_client.post(
+        f"/fragments/settings/missing-files/delete/{orphaned_id}", headers={"X-CSRF-Token": csrf_token}
+    )
+
+    assert delete.status_code == 200
+    assert "削除しました" in delete.text
+    assert "見つかりませんでした" in delete.text
+    assert db.get(Item, orphaned_id) is None
