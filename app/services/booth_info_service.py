@@ -37,6 +37,12 @@ _MAX_SEARCH_RESULTS = 5
 _QUERY_SEPARATOR_RE = re.compile(r"[_.]+")
 _QUERY_WHITESPACE_RE = re.compile(r"\s+")
 
+# Once separators are spaces, a version number like "2.3" becomes two bare
+# numeric tokens ("2", "3") sitting in the query on their own -- these are
+# almost never part of the actual product name and only dilute the match, so
+# they're dropped entirely rather than just having their separator softened.
+_NUMERIC_TOKEN_RE = re.compile(r"^\d+$")
+
 
 @dataclass(slots=True)
 class BoothProductInfo:
@@ -260,7 +266,12 @@ def search_products(query: str | None, *, client: httpx.Client | None = None) ->
         return []
 
     normalized_query = _QUERY_WHITESPACE_RE.sub(" ", _QUERY_SEPARATOR_RE.sub(" ", query)).strip()
-    search_url = f"https://booth.pm/ja/search/{quote(normalized_query)}"
+    tokens = [t for t in normalized_query.split(" ") if not _NUMERIC_TOKEN_RE.match(t)]
+    # Falls back to the un-filtered query on the rare chance every token was
+    # numeric (e.g. the whole name was "1.0") -- searching *something* beats
+    # searching nothing.
+    final_query = " ".join(tokens) or normalized_query
+    search_url = f"https://booth.pm/ja/search/{quote(final_query)}"
     try:
         if not robots_allow(search_url):
             logger.info("robots.txt disallows fetching %s; skipping BOOTH search suggestions", search_url)

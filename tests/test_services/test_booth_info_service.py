@@ -240,10 +240,15 @@ def test_search_products_returns_empty_list_for_no_results(monkeypatch: pytest.M
     assert booth_info_service.search_products("該当なし", client=_client(handler)) == []
 
 
-def test_search_products_normalizes_filename_separators_to_spaces(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_search_products_normalizes_filename_separators_and_drops_bare_numbers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # Item titles auto-derived from an uploaded filename keep underscores/dots
     # (e.g. "grade_hair_2.3") -- BOOTH treats those as literal characters, not
     # word breaks, so they must become spaces before hitting the search URL.
+    # The version number's digits ("2", "3") become bare numeric tokens once
+    # split out, which are noise rather than part of the product name, so
+    # they're dropped too.
     _allow_robots(monkeypatch)
     seen_urls: list[str] = []
 
@@ -253,7 +258,24 @@ def test_search_products_normalizes_filename_separators_to_spaces(monkeypatch: p
 
     booth_info_service.search_products("grade_hair_2.3", client=_client(handler))
 
-    assert seen_urls == ["https://booth.pm/ja/search/grade%20hair%202%203"]
+    assert seen_urls == ["https://booth.pm/ja/search/grade%20hair"]
+
+
+def test_search_products_falls_back_to_unfiltered_query_when_every_token_is_numeric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Dropping every bare-numeric token would leave nothing to search with --
+    # searching the original (unfiltered) query beats searching nothing.
+    _allow_robots(monkeypatch)
+    seen_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(request.url))
+        return httpx.Response(200, text=HTML_SEARCH_NO_RESULTS, headers={"content-type": "text/html"})
+
+    booth_info_service.search_products("1.0", client=_client(handler))
+
+    assert seen_urls == ["https://booth.pm/ja/search/1%200"]
 
 
 def test_search_products_returns_empty_list_for_empty_query() -> None:
