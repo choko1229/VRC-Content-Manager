@@ -232,13 +232,26 @@
     });
   }
 
-  function upload(file) {
-    var toastId = window.Toast.show({
-      title: "アップロード中",
-      message: file.name,
-      progress: 0,
+  // A failed upload's toast stays put (no auto-dismiss) with a "再実行"
+  // button that retries the exact same File object in place, reusing the
+  // toast so the user doesn't have to re-pick the file or lose track of
+  // which upload failed.
+  function showUploadError(file, toastId, title, message) {
+    window.Toast.update(toastId, {
+      title: title,
+      message: message,
+      variant: "error",
       duration: 0,
+      actions: [
+        { label: "再実行", variant: "primary", onClick: function (toastId) { upload(file, toastId); } },
+      ],
     });
+  }
+
+  function upload(file, retryToastId) {
+    var toastId = retryToastId
+      ? window.Toast.update(retryToastId, { title: "アップロード中", message: file.name, progress: 0, duration: 0 })
+      : window.Toast.show({ title: "アップロード中", message: file.name, progress: 0, duration: 0 });
 
     if (file.size > CHUNK_SIZE_BYTES) {
       uploadChunked(file, toastId);
@@ -284,12 +297,7 @@
       }
       var uploadError = finalUrl && finalUrl.searchParams.get("upload_error");
       if (uploadError) {
-        window.Toast.update(toastId, {
-          title: "アップロードに失敗しました",
-          message: uploadError,
-          variant: "error",
-          duration: 8000,
-        });
+        showUploadError(file, toastId, "アップロードに失敗しました", uploadError);
         return;
       }
       // The "load" event fires for any completed response, including
@@ -304,12 +312,7 @@
         } catch (err) {
           serverMessage = null;
         }
-        window.Toast.update(toastId, {
-          title: "アップロードに失敗しました",
-          message: serverMessage || ("サーバーエラー (" + xhr.status + ")"),
-          variant: "error",
-          duration: 8000,
-        });
+        showUploadError(file, toastId, "アップロードに失敗しました", serverMessage || ("サーバーエラー (" + xhr.status + ")"));
         return;
       }
       window.Toast.update(toastId, {
@@ -330,12 +333,7 @@
     });
 
     xhr.addEventListener("error", function () {
-      window.Toast.update(toastId, {
-        title: "アップロードに失敗しました",
-        message: "ネットワークエラーが発生しました。",
-        variant: "error",
-        duration: 8000,
-      });
+      showUploadError(file, toastId, "アップロードに失敗しました", "ネットワークエラーが発生しました。");
     });
 
     var body = new FormData();
@@ -404,17 +402,15 @@
         showDuplicateConfirmToast(completeResult.item_id, completeResult.duplicate_of, completeResult.duplicate_name);
       }
     } catch (err) {
-      window.Toast.update(toastId, {
-        title: "アップロードに失敗しました",
-        message: (err && err.message) || "ネットワークエラーが発生しました。",
-        variant: "error",
-        duration: 8000,
-      });
+      showUploadError(file, toastId, "アップロードに失敗しました", (err && err.message) || "ネットワークエラーが発生しました。");
     }
   }
 
   function uploadAll(files) {
-    Array.prototype.forEach.call(files, upload);
+    // Not Array.prototype.forEach.call(files, upload) -- forEach passes
+    // (element, index, array) to its callback, and upload's 2nd param is a
+    // retry toast id, so the index would get misread as one.
+    Array.prototype.forEach.call(files, function (file) { upload(file); });
   }
 
   input.addEventListener("change", function () {
