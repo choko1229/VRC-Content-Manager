@@ -54,7 +54,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import DriveError
 from app.core.validation import DEFAULT_ALLOWED_EXTENSIONS
-from app.db.session import get_sessionmaker
+from app.db.session import background_write_lock, get_sessionmaker
 from app.drive import folder_layout
 from app.drive.client import DriveClient
 from app.drive.types import FOLDER_MIME_TYPE, DriveFile
@@ -111,13 +111,19 @@ def _default_status(db: Session) -> Status | None:
 
 
 def reconcile(db: Session, drive_client: DriveClient) -> ReconcileResult:
-    file_folder_id = folder_layout.ensure_file_folder(drive_client)
-    upload_folder_id = folder_layout.ensure_upload_folder(drive_client)
+    # Held for the whole sweep (not just around individual commits): this
+    # runs on its own thread and can otherwise overlap with the other
+    # background DB-writing flows (upload_sync_service, drive_sync_service,
+    # item_service's dedup sweep) closely enough to lose SQLite's
+    # busy_timeout race -- see background_write_lock's docstring.
+    with background_write_lock:
+        file_folder_id = folder_layout.ensure_file_folder(drive_client)
+        upload_folder_id = folder_layout.ensure_upload_folder(drive_client)
 
-    migrated = _migrate_legacy_files(db, drive_client, file_folder_id)
-    imported = _import_unknown_files(db, drive_client, upload_folder_id, file_folder_id)
-    imported += _import_unknown_files(db, drive_client, file_folder_id, file_folder_id)
-    removed = _remove_broken_references(db, drive_client)
+        migrated = _migrate_legacy_files(db, drive_client, file_folder_id)
+        imported = _import_unknown_files(db, drive_client, upload_folder_id, file_folder_id)
+        imported += _import_unknown_files(db, drive_client, file_folder_id, file_folder_id)
+        removed = _remove_broken_references(db, drive_client)
 
     if removed or imported or migrated:
         drive_sync_service.mark_dirty()

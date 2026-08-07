@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
 from app.core.exceptions import NotFoundError
-from app.db.session import get_sessionmaker
+from app.db.session import background_write_lock, get_sessionmaker
 from app.drive.client import DriveClient
 from app.models.avatar import Avatar
 from app.models.item import Item, ItemCategory
@@ -473,23 +473,29 @@ def auto_merge_duplicate_products(db: Session) -> int:
     Returns the number of items merged away. See merge_loop for the
     periodic background sweep that calls this automatically.
     """
-    duplicate_urls = db.execute(
-        select(Item.product_url)
-        .where(Item.product_url.is_not(None))
-        .group_by(Item.product_url)
-        .having(func.count(Item.id) > 1)
-    ).scalars().all()
-
-    merged = 0
-    for url in duplicate_urls:
-        items = db.execute(
-            select(Item).where(Item.product_url == url).order_by(Item.created_at.asc(), Item.id.asc())
+    # Held for the whole sweep: this runs on its own thread (the periodic
+    # dedup loop) and can otherwise overlap with the other background
+    # DB-writing flows (upload_sync_service, drive_sync_service,
+    # drive_reconcile_service) closely enough to lose SQLite's busy_timeout
+    # race -- see background_write_lock's docstring.
+    with background_write_lock:
+        duplicate_urls = db.execute(
+            select(Item.product_url)
+            .where(Item.product_url.is_not(None))
+            .group_by(Item.product_url)
+            .having(func.count(Item.id) > 1)
         ).scalars().all()
-        target, *duplicates = items
-        for dup in duplicates:
-            merge_item_into(db, dup.id, target.id)
-            merged += 1
-    return merged
+
+        merged = 0
+        for url in duplicate_urls:
+            items = db.execute(
+                select(Item).where(Item.product_url == url).order_by(Item.created_at.asc(), Item.id.asc())
+            ).scalars().all()
+            target, *duplicates = items
+            for dup in duplicates:
+                merge_item_into(db, dup.id, target.id)
+                merged += 1
+        return merged
 
 
 def delete_item(db: Session, item_id: int, *, drive_client: DriveClient | None = None) -> None:

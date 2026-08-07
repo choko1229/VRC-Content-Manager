@@ -33,7 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import DriveError
-from app.db.session import get_sessionmaker
+from app.db.session import background_write_lock, get_sessionmaker
 from app.drive import folder_layout
 from app.drive.client import DriveClient
 from app.models.item_file import ItemFile
@@ -116,17 +116,25 @@ def sync_pending_now() -> int:
             logger.info("upload_sync_service: Drive not connected, skipping pending sync")
             return 0
 
-        pending_ids = list(db.execute(select(ItemFile.id).where(ItemFile.synced_at.is_(None))).scalars().all())
-        synced = 0
-        for item_file_id in pending_ids:
-            if not _try_claim(item_file_id):
-                continue
-            try:
-                if sync_item_file(db, item_file_id, drive_client):
-                    synced += 1
-            finally:
-                _release(item_file_id)
-        return synced
+        # Held for the whole sweep (not just around individual commits): this
+        # runs on its own thread -- once per upload (fire-and-forget) plus the
+        # periodic sweep -- and several can otherwise overlap with each other
+        # or with the other background DB-writing flows (drive_sync_service,
+        # drive_reconcile_service, item_service's dedup sweep) closely enough
+        # to lose SQLite's busy_timeout race -- see background_write_lock's
+        # docstring.
+        with background_write_lock:
+            pending_ids = list(db.execute(select(ItemFile.id).where(ItemFile.synced_at.is_(None))).scalars().all())
+            synced = 0
+            for item_file_id in pending_ids:
+                if not _try_claim(item_file_id):
+                    continue
+                try:
+                    if sync_item_file(db, item_file_id, drive_client):
+                        synced += 1
+                finally:
+                    _release(item_file_id)
+            return synced
 
 
 async def sync_loop(stop_event: asyncio.Event) -> None:

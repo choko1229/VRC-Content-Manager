@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.core.exceptions import DriveError
 from app.db.migrate import run_migrations
-from app.db.session import get_sessionmaker
+from app.db.session import background_write_lock, get_sessionmaker
 from app.drive import folder_layout
 from app.drive.client import DriveClient
 from app.drive.google_drive_client import GoogleDriveClient
@@ -72,6 +72,10 @@ def snapshot_db_to(dest_path: Path) -> None:
     # user input), so a quote-escaped literal is safe here.
     escaped = str(dest_path).replace("'", "''")
     with sqlite3.connect(str(settings.local_db_path)) as conn:
+        # This is a raw connection, not one made through app.db.session's
+        # engine -- it doesn't inherit that engine's "connect" event
+        # listener, so the busy timeout needs setting again here too.
+        conn.execute("PRAGMA busy_timeout=5000")
         conn.execute(f"VACUUM INTO '{escaped}'")
 
 
@@ -144,34 +148,40 @@ def flush_now(db: Session, *, drive_client: DriveClient | None = None) -> bool:
     if not _dirty:
         return False
 
-    drive_file_id = app_settings_service.get_setting(db, _SETTING_DRIVE_DB_FILE_ID)
-    if not drive_file_id:
-        logger.warning("skipping Drive sync: no drive_db_file_id recorded yet (was /setup completed?)")
-        return False
-
-    if drive_client is None:
-        try:
-            drive_client = oauth_service.make_drive_client(db)
-        except oauth_service.NotConnectedError:
-            logger.warning("skipping Drive sync: not connected")
+    # Held for the whole push (not just around individual commits): this
+    # runs on its own thread and can otherwise overlap with the other
+    # background DB-writing flows (upload_sync_service, drive_reconcile_service,
+    # item_service's dedup sweep) closely enough to lose SQLite's
+    # busy_timeout race -- see background_write_lock's docstring.
+    with background_write_lock:
+        drive_file_id = app_settings_service.get_setting(db, _SETTING_DRIVE_DB_FILE_ID)
+        if not drive_file_id:
+            logger.warning("skipping Drive sync: no drive_db_file_id recorded yet (was /setup completed?)")
             return False
 
-    drive_file_id = _ensure_db_file_exists(db, drive_client, drive_file_id)
+        if drive_client is None:
+            try:
+                drive_client = oauth_service.make_drive_client(db)
+            except oauth_service.NotConnectedError:
+                logger.warning("skipping Drive sync: not connected")
+                return False
 
-    settings = get_settings()
-    tmp_snapshot = settings.data_dir / "tmp" / f"sync_snapshot_{uuid.uuid4().hex}.db"
-    try:
-        snapshot_db_to(tmp_snapshot)
-        drive_client.update_file_content(
-            file_id=drive_file_id, local_path=tmp_snapshot, mime_type="application/x-sqlite3"
-        )
-    finally:
-        tmp_snapshot.unlink(missing_ok=True)
+        drive_file_id = _ensure_db_file_exists(db, drive_client, drive_file_id)
 
-    _record_push_metadata(db, drive_client, drive_file_id)
-    _dirty = False
-    logger.info("synced local database to Drive (file_id=%s)", drive_file_id)
-    return True
+        settings = get_settings()
+        tmp_snapshot = settings.data_dir / "tmp" / f"sync_snapshot_{uuid.uuid4().hex}.db"
+        try:
+            snapshot_db_to(tmp_snapshot)
+            drive_client.update_file_content(
+                file_id=drive_file_id, local_path=tmp_snapshot, mime_type="application/x-sqlite3"
+            )
+        finally:
+            tmp_snapshot.unlink(missing_ok=True)
+
+        _record_push_metadata(db, drive_client, drive_file_id)
+        _dirty = False
+        logger.info("synced local database to Drive (file_id=%s)", drive_file_id)
+        return True
 
 
 def _ensure_db_file_exists(db: Session, drive_client: DriveClient, drive_file_id: str) -> str:
