@@ -35,14 +35,19 @@
     <p id="fetch-info-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
       <span class="icon text-[1rem]" aria-hidden="true">progress_activity</span>取得中…
     </p>
-    {# Searches BOOTH by the (filename-derived) item name and shows guessed
-       product matches -- clicking a suggestion fills BoothURL above and
-       triggers the same fetch-info lookup as pasting the URL by hand.
-       Manual (not auto-run-on-load) so it stays usable even after the item
-       is already linked, e.g. to double-check or re-search. hx-target is
-       set explicitly here (an id selector, not "this"), so it's unaffected
-       by the enclosing <form>'s own hx-target="this"/hx-swap="none". #}
-    <button type="button" hx-get="/fragments/items/booth-search?q={{ item_name | urlencode }}"
+    {# Searches BOOTH using the *current* value of the title field below
+       (hx-vals reads it live at click time, not a value baked into this
+       button at panel-render time) -- otherwise editing the filename-derived
+       title before searching would have no effect, since autosave only
+       OOB-swaps the header caption, never this button's own attributes.
+       Clicking a suggestion fills BoothURL above and triggers the same
+       fetch-info lookup as pasting the URL by hand. Manual (not
+       auto-run-on-load) so it stays usable even after the item is already
+       linked, e.g. to double-check or re-search. hx-target is set
+       explicitly here (an id selector, not "this"), so it's unaffected by
+       the enclosing <form>'s own hx-target="this"/hx-swap="none". #}
+    <button type="button" hx-get="/fragments/items/booth-search"
+            hx-vals='js:{q: document.getElementById("f-name").value}'
             hx-target="#booth-suggestions" hx-swap="outerHTML" hx-indicator="#booth-search-indicator"
             class="inline-flex items-center gap-1.5 min-h-8 px-3 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
       <span class="icon text-[0.95rem]" aria-hidden="true">search</span>ファイル名で検索

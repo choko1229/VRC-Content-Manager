@@ -49,6 +49,11 @@
 
   <div id="toast-region" class="fixed top-16 right-3 sm:right-4 z-[60] flex flex-col gap-2 w-[calc(100vw-1.5rem)] max-w-sm" aria-live="polite"></div>
 
+  {# Mount point for items/_booth_preview_modal.html (see the script block
+     near the end of this file) -- hx-get on a search candidate button
+     (items/_booth_search_result.html) swaps its content in here. #}
+  <div id="booth-preview-modal-root"></div>
+
   <header class="sticky top-0 z-40 h-14 flex items-center backdrop-blur-2xl bg-white/35 dark:bg-slate-950/30 border-b border-white/50 dark:border-white/10 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
     <div class="w-full px-4 sm:px-5 flex items-center gap-4">
       <a href="/items" class="flex items-center gap-2 font-light text-lg tracking-tight text-slate-900 dark:text-white shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark rounded-lg">
@@ -391,19 +396,55 @@
 
   <script>
     /* Delegated on `document` (see the combobox script above for why):
-       clicking a filename-guessed BOOTH suggestion (items/_edit_panel.html,
-       items/_booth_search_result.html) fills the BoothURL field and fires
-       the same "change" it'd get from pasting a URL by hand, reusing the
-       existing fetch-info lookup instead of duplicating it. */
+       drives items/_booth_preview_modal.html, which a filename-search
+       candidate (items/_booth_search_result.html) opens via its own
+       hx-get/hx-target into #booth-preview-modal-root -- this script only
+       handles what happens once that modal is on screen:
+         - 反映 (js-booth-preview-apply) fills BoothURL and fires the same
+           "change" a hand-pasted URL would, reusing the existing
+           fetch-info lookup instead of duplicating it, then closes the
+           modal.
+         - キャンセル (js-booth-preview-cancel) closes the modal AND clears
+           the candidate list's contents -- "never mind, none of these".
+           Empties #booth-suggestions rather than removing it, since the
+           "ファイル名で検索" button's own hx-target="#booth-suggestions"
+           hx-swap="outerHTML" (items/_edit_panel.html) needs that element
+           to still exist for a later re-search to have anywhere to land.
+         - 別候補をリストで表示 / the header close button
+           (js-booth-preview-back), the backdrop itself, and Escape all just
+           close the modal, leaving the candidate list open underneath to
+           pick a different one. */
     document.addEventListener("click", function (e) {
-      var card = e.target.closest(".js-booth-suggestion");
-      if (!card) return;
-      var field = document.getElementById("f-product_url");
-      if (!field) return;
-      field.value = card.dataset.productUrl;
-      field.dispatchEvent(new Event("input", { bubbles: true }));
-      field.dispatchEvent(new Event("change", { bubbles: true }));
+      var applyBtn = e.target.closest(".js-booth-preview-apply");
+      if (applyBtn) {
+        var field = document.getElementById("f-product_url");
+        if (field) {
+          field.value = applyBtn.dataset.productUrl;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          field.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        closeBoothPreviewModal();
+        return;
+      }
+      if (e.target.closest(".js-booth-preview-cancel")) {
+        closeBoothPreviewModal();
+        var list = document.getElementById("booth-suggestions");
+        if (list) list.innerHTML = "";
+        return;
+      }
+      if (e.target.closest(".js-booth-preview-back") || e.target.classList.contains("js-booth-preview-backdrop")) {
+        closeBoothPreviewModal();
+      }
     });
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeBoothPreviewModal();
+    });
+
+    function closeBoothPreviewModal() {
+      var root = document.getElementById("booth-preview-modal-root");
+      if (root) root.innerHTML = "";
+    }
   </script>
 </body>
 </html>

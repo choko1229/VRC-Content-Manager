@@ -105,6 +105,33 @@ async def booth_search_fragment(request: Request, q: str = ""):
     return templates.TemplateResponse(request, "items/_booth_search_result.html", {"results": results})
 
 
+@router.get("/booth-preview")
+async def booth_preview_fragment(
+    request: Request, product_url: str = "", name: str = "", shop_name: str = "", thumbnail_url: str = ""
+):
+    # Clicking a search candidate (items/_booth_search_result.html) opens
+    # this as a confirmation modal instead of applying the URL immediately --
+    # BOOTH sends X-Frame-Options: SAMEORIGIN (it can't be embedded), and
+    # even proxying around that would put its live "cart"/"purchase" buttons
+    # one misclick away inside what looks like a harmless preview, so this
+    # only ever shows metadata already fetched server-side (the same
+    # low-risk single-fetch policy as try_fetch_product_info generally).
+    # name/shop_name/thumbnail_url are the lighter fields the search card
+    # already had, used as a fallback if this deeper fetch fails.
+    info = await run_in_threadpool(booth_info_service.try_fetch_product_info, product_url)
+    return templates.TemplateResponse(
+        request,
+        "items/_booth_preview_modal.html",
+        {
+            "product_url": product_url,
+            "info": info,
+            "fallback_name": name,
+            "fallback_shop_name": shop_name,
+            "fallback_thumbnail_url": thumbnail_url,
+        },
+    )
+
+
 @router.get("")
 def search_items_fragment(request: Request, db: Session = Depends(get_db)):
     params = request.query_params

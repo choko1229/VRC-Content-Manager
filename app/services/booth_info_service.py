@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from urllib.parse import quote
 
@@ -27,6 +28,14 @@ from app.services.booth_common import make_client, robots_allow
 logger = logging.getLogger(__name__)
 
 _MAX_SEARCH_RESULTS = 5
+
+# Item titles auto-derived from an uploaded filename (see
+# app/web/pages/items.py:_derive_name_from_filename) keep the filename's own
+# word separators (e.g. "grade_hair_2.3"), which BOOTH's search treats as
+# literal characters rather than word breaks -- collapsing them to spaces
+# before searching makes the query look like something a human would type.
+_QUERY_SEPARATOR_RE = re.compile(r"[_.]+")
+_QUERY_WHITESPACE_RE = re.compile(r"\s+")
 
 
 @dataclass(slots=True)
@@ -250,7 +259,8 @@ def search_products(query: str | None, *, client: httpx.Client | None = None) ->
     if not query:
         return []
 
-    search_url = f"https://booth.pm/ja/search/{quote(query)}"
+    normalized_query = _QUERY_WHITESPACE_RE.sub(" ", _QUERY_SEPARATOR_RE.sub(" ", query)).strip()
+    search_url = f"https://booth.pm/ja/search/{quote(normalized_query)}"
     try:
         if not robots_allow(search_url):
             logger.info("robots.txt disallows fetching %s; skipping BOOTH search suggestions", search_url)

@@ -54,7 +54,10 @@ def test_booth_search_route_renders_suggestion_cards(client, monkeypatch: pytest
 
     assert response.status_code == 200
     assert "js-booth-suggestion" in response.text
-    assert 'data-product-url="https://booth.pm/ja/items/123"' in response.text
+    # Clicking a candidate opens the confirmation modal (booth-preview) rather
+    # than applying the URL directly -- see booth_preview_fragment.
+    assert 'hx-get="/fragments/items/booth-preview?product_url=https%3A//booth.pm/ja/items/123' in response.text
+    assert 'hx-target="#booth-preview-modal-root"' in response.text
     assert "Cool Avatar" in response.text
     assert "Cool Shop" in response.text
 
@@ -83,7 +86,10 @@ def test_edit_panel_shows_a_manual_filename_search_button(client, tmp_path: Path
     """The search is user-triggered (a button), not auto-run on load -- see
     items/_edit_panel.html. hx-target is an explicit id selector here, not
     "this", so it's unaffected by the enclosing <form>'s own
-    hx-target="this"/hx-swap="none" (which would otherwise be inherited)."""
+    hx-target="this"/hx-swap="none" (which would otherwise be inherited).
+    The query itself comes from hx-vals reading the title field live (id
+    "f-name") rather than a value baked in at panel-render time, so editing
+    the filename-derived title before searching actually takes effect."""
     test_client, db = client
     created = item_service.create_item_with_file(
         db, data=ItemCreate(name="Unlinked Item", shop_name="未設定"), primary_upload=_make_upload(tmp_path, "a.zip")
@@ -93,7 +99,8 @@ def test_edit_panel_shows_a_manual_filename_search_button(client, tmp_path: Path
 
     assert response.status_code == 200
     assert "ファイル名で検索" in response.text
-    assert 'hx-get="/fragments/items/booth-search?q=Unlinked' in response.text
+    assert 'hx-get="/fragments/items/booth-search"' in response.text
+    assert 'hx-vals=\'js:{q: document.getElementById("f-name").value}\'' in response.text
     assert 'hx-target="#booth-suggestions"' in response.text
 
 
@@ -110,7 +117,7 @@ def test_edit_panel_shows_the_search_button_even_when_already_linked(client, tmp
     response = test_client.get(f"/fragments/items/{created.id}/edit")
 
     assert response.status_code == 200
-    assert 'hx-get="/fragments/items/booth-search?q=Linked' in response.text
+    assert 'hx-get="/fragments/items/booth-search"' in response.text
 
 
 def test_fetch_info_result_clears_suggestions_on_successful_fetch(client, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,3 +131,47 @@ def test_fetch_info_result_clears_suggestions_on_successful_fetch(client, monkey
 
     assert response.status_code == 200
     assert 'id="booth-suggestions" hx-swap-oob="true"' in response.text
+
+
+def test_booth_preview_shows_fetched_metadata(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    test_client, _db = client
+    fetched = booth_info_service.BoothProductInfo(
+        name="Cool Avatar", shop_name="Cool Shop", shop_url=None, price=1500,
+        image_url="https://booth.pximg.net/full.jpg", description="ふわふわの尻尾です。",
+    )
+    monkeypatch.setattr(booth_info_service, "try_fetch_product_info", lambda url: fetched)
+
+    response = test_client.get(
+        "/fragments/items/booth-preview", params={"product_url": "https://booth.pm/ja/items/123"}
+    )
+
+    assert response.status_code == 200
+    assert "この商品でよろしいですか" in response.text
+    assert "Cool Avatar" in response.text
+    assert "Cool Shop" in response.text
+    assert "1,500" in response.text
+    assert "ふわふわの尻尾です。" in response.text
+    assert 'src="https://booth.pximg.net/full.jpg"' in response.text
+    assert 'href="https://booth.pm/ja/items/123"' in response.text
+    assert 'data-product-url="https://booth.pm/ja/items/123"' in response.text
+
+
+def test_booth_preview_falls_back_to_candidate_data_when_fetch_fails(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    test_client, _db = client
+    monkeypatch.setattr(booth_info_service, "try_fetch_product_info", lambda url: None)
+
+    response = test_client.get(
+        "/fragments/items/booth-preview",
+        params={
+            "product_url": "https://booth.pm/ja/items/123",
+            "name": "Cool Avatar",
+            "shop_name": "Cool Shop",
+            "thumbnail_url": "https://booth.pximg.net/thumb.jpg",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Cool Avatar" in response.text
+    assert "Cool Shop" in response.text
+    assert 'src="https://booth.pximg.net/thumb.jpg"' in response.text
+    assert "詳細の自動取得に失敗しました" in response.text

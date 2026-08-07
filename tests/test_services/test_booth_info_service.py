@@ -240,6 +240,22 @@ def test_search_products_returns_empty_list_for_no_results(monkeypatch: pytest.M
     assert booth_info_service.search_products("該当なし", client=_client(handler)) == []
 
 
+def test_search_products_normalizes_filename_separators_to_spaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Item titles auto-derived from an uploaded filename keep underscores/dots
+    # (e.g. "grade_hair_2.3") -- BOOTH treats those as literal characters, not
+    # word breaks, so they must become spaces before hitting the search URL.
+    _allow_robots(monkeypatch)
+    seen_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(request.url))
+        return httpx.Response(200, text=HTML_SEARCH_NO_RESULTS, headers={"content-type": "text/html"})
+
+    booth_info_service.search_products("grade_hair_2.3", client=_client(handler))
+
+    assert seen_urls == ["https://booth.pm/ja/search/grade%20hair%202%203"]
+
+
 def test_search_products_returns_empty_list_for_empty_query() -> None:
     assert booth_info_service.search_products("") == []
     assert booth_info_service.search_products(None) == []
