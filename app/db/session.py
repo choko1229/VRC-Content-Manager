@@ -18,22 +18,27 @@ from app.config import get_settings
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
 
-# Several independent background flows (upload_sync_service pushing a
-# just-uploaded file, drive_sync_service's debounced DB snapshot/push,
-# drive_reconcile_service's periodic sweep, item_service's dedup sweep) each
-# run on their own thread (via asyncio.to_thread/run_in_threadpool) and can
-# fire close together -- e.g. several quick-uploads in a row each schedule
-# their own fire-and-forget sync. SQLite only ever allows one writer at a
-# time; WAL mode + PRAGMA busy_timeout (below) makes a late writer wait
-# rather than fail immediately, but under real concurrent load from several
-# of these flows at once the wait can still be exceeded, surfacing as
-# "database is locked". background_write_lock serializes each flow's DB work
-# at the Python level so they queue deterministically instead of racing
-# SQLite's timeout. Only the four background entrypoints (reconcile(),
-# flush_now(), sync_pending_now(), auto_merge_duplicate_products()) hold it,
-# and none of them call into each other, so there's no risk of a nested
-# (and therefore deadlocking, since threading.Lock isn't reentrant) acquire.
-background_write_lock = threading.Lock()
+# A request that creates/edits/deletes an item runs its DB work on its own
+# threadpool thread (FastAPI's run_in_threadpool), same as the background
+# flows (upload_sync_service pushing a file, drive_sync_service's debounced
+# snapshot/push, drive_reconcile_service's periodic sweep, item_service's
+# dedup sweep). Uploading several files at once -- the whole point of the
+# TOP page's multi-file drag-and-drop -- fires that many concurrent
+# create_item_with_file calls, each on its own thread, each also scheduling
+# its own fire-and-forget upload_sync_service push. SQLite only ever allows
+# one writer at a time; WAL mode + PRAGMA busy_timeout (below) makes a late
+# writer wait rather than fail immediately, but under real concurrent load
+# from several of these at once the wait can still be exceeded (or lost to
+# starvation against a stream of newer contenders), surfacing as "database is
+# locked". db_write_lock serializes every DB-writing entrypoint at the Python
+# level so they queue deterministically instead of racing SQLite's timeout.
+#
+# It's an RLock, not a plain Lock, specifically because some of these
+# entrypoints call each other on the same thread (e.g. auto_merge_duplicate_
+# products -> merge_item_into, merge_duplicate_group -> delete_item) -- a
+# plain Lock would deadlock on that same-thread nested acquire; RLock only
+# blocks a *different* thread, which is exactly what's needed here.
+db_write_lock = threading.RLock()
 
 
 def get_engine() -> Engine:

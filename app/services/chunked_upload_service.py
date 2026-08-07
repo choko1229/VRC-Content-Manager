@@ -28,7 +28,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from starlette.requests import Request
+from starlette.requests import ClientDisconnect, Request
 
 from app.config import get_settings
 from app.core.validation import (
@@ -122,6 +122,18 @@ async def write_chunk(upload_id: str, chunk_index: int, request: Request) -> Non
                 if already_received + size > max_bytes:
                     raise UploadValidationError(f"ファイルサイズが上限({session.max_size_mb}MB)を超えています")
                 fh.write(piece)
+    except ClientDisconnect:
+        # The browser tab closed, network dropped, etc. mid-chunk -- expected
+        # and unremarkable (there's no client left to see a response either
+        # way), not a server bug, so this doesn't propagate to the generic
+        # unhandled-exception handler's ERROR-level traceback log. The
+        # abandoned session itself is swept later by purge_loop.
+        chunk_path.unlink(missing_ok=True)
+        logger.info(
+            "chunked_upload_service: client disconnected mid-chunk (upload_id=%s chunk_index=%s)",
+            upload_id,
+            chunk_index,
+        )
     except Exception:
         chunk_path.unlink(missing_ok=True)
         raise

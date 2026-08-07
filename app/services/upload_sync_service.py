@@ -33,7 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import DriveError
-from app.db.session import background_write_lock, get_sessionmaker
+from app.db.session import db_write_lock, get_sessionmaker
 from app.drive import folder_layout
 from app.drive.client import DriveClient
 from app.models.item_file import ItemFile
@@ -121,9 +121,9 @@ def sync_pending_now() -> int:
         # periodic sweep -- and several can otherwise overlap with each other
         # or with the other background DB-writing flows (drive_sync_service,
         # drive_reconcile_service, item_service's dedup sweep) closely enough
-        # to lose SQLite's busy_timeout race -- see background_write_lock's
+        # to lose SQLite's busy_timeout race -- see db_write_lock's
         # docstring.
-        with background_write_lock:
+        with db_write_lock:
             pending_ids = list(db.execute(select(ItemFile.id).where(ItemFile.synced_at.is_(None))).scalars().all())
             synced = 0
             for item_file_id in pending_ids:

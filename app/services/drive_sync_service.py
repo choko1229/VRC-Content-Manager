@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.core.exceptions import DriveError
 from app.db.migrate import run_migrations
-from app.db.session import background_write_lock, get_sessionmaker
+from app.db.session import db_write_lock, get_sessionmaker
 from app.drive import folder_layout
 from app.drive.client import DriveClient
 from app.drive.google_drive_client import GoogleDriveClient
@@ -152,8 +152,8 @@ def flush_now(db: Session, *, drive_client: DriveClient | None = None) -> bool:
     # runs on its own thread and can otherwise overlap with the other
     # background DB-writing flows (upload_sync_service, drive_reconcile_service,
     # item_service's dedup sweep) closely enough to lose SQLite's
-    # busy_timeout race -- see background_write_lock's docstring.
-    with background_write_lock:
+    # busy_timeout race -- see db_write_lock's docstring.
+    with db_write_lock:
         drive_file_id = app_settings_service.get_setting(db, _SETTING_DRIVE_DB_FILE_ID)
         if not drive_file_id:
             logger.warning("skipping Drive sync: no drive_db_file_id recorded yet (was /setup completed?)")

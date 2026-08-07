@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
 from app.core.exceptions import NotFoundError
-from app.db.session import background_write_lock, get_sessionmaker
+from app.db.session import db_write_lock, get_sessionmaker
 from app.drive.client import DriveClient
 from app.models.avatar import Avatar
 from app.models.item import Item, ItemCategory
@@ -290,45 +290,51 @@ def update_item(
     thumbnail_upload: ValidatedUpload | None = None,
     drive_client: DriveClient | None = None,
 ) -> ItemRead:
-    item = db.get(Item, item_id)
-    if item is None:
-        raise NotFoundError("Item", item_id)
+    # Held for the whole edit (not just around the commit): a request-path
+    # write runs on its own threadpool thread just like the background
+    # DB-writing flows, and can otherwise overlap with them (or with another
+    # concurrent request) closely enough to lose SQLite's busy_timeout race
+    # -- see db_write_lock's docstring.
+    with db_write_lock:
+        item = db.get(Item, item_id)
+        if item is None:
+            raise NotFoundError("Item", item_id)
 
-    shop = shop_service.get_or_create_shop(db, name=data.shop_name, url=data.shop_url)
-    tags = tag_service.get_or_create_tags(db, data.tags)
-    avatars = avatar_service.resolve_existing_avatars(db, data.avatars)
-    status = _resolve_status(db, data.status_code)
+        shop = shop_service.get_or_create_shop(db, name=data.shop_name, url=data.shop_url)
+        tags = tag_service.get_or_create_tags(db, data.tags)
+        avatars = avatar_service.resolve_existing_avatars(db, data.avatars)
+        status = _resolve_status(db, data.status_code)
 
-    item.shop = shop
-    item.name = data.name
-    item.category = data.category
-    item.product_url = data.product_url
-    item.download_source_url = data.download_source_url
-    item.purchase_date = data.purchase_date
-    item.download_date = data.download_date
-    item.price = data.price
-    item.status = status
-    item.description = data.description
-    item.memo = data.memo
-    item.is_favorite = data.is_favorite
-    item.tags = tags
-    item.avatars = avatars
+        item.shop = shop
+        item.name = data.name
+        item.category = data.category
+        item.product_url = data.product_url
+        item.download_source_url = data.download_source_url
+        item.purchase_date = data.purchase_date
+        item.download_date = data.download_date
+        item.price = data.price
+        item.status = status
+        item.description = data.description
+        item.memo = data.memo
+        item.is_favorite = data.is_favorite
+        item.tags = tags
+        item.avatars = avatars
 
-    if item.license is None:
-        item.license = License(item_id=item.id)
-    item.license.commercial_use = data.commercial_use
-    item.license.modification_allowed = data.modification_allowed
-    item.license.redistribution_allowed = data.redistribution_allowed
-    item.license.credit_required = data.credit_required
-    item.license.note = data.license_note
+        if item.license is None:
+            item.license = License(item_id=item.id)
+        item.license.commercial_use = data.commercial_use
+        item.license.modification_allowed = data.modification_allowed
+        item.license.redistribution_allowed = data.redistribution_allowed
+        item.license.credit_required = data.credit_required
+        item.license.note = data.license_note
 
-    db.commit()
-    db.refresh(item)
-
-    resolved_thumbnail = _resolve_edit_thumbnail(item, data, thumbnail_upload)
-    if resolved_thumbnail is not None:
-        _apply_thumbnail(db, item, resolved_thumbnail, drive_client)
+        db.commit()
         db.refresh(item)
+
+        resolved_thumbnail = _resolve_edit_thumbnail(item, data, thumbnail_upload)
+        if resolved_thumbnail is not None:
+            _apply_thumbnail(db, item, resolved_thumbnail, drive_client)
+            db.refresh(item)
 
     drive_sync_service.mark_dirty()
     logger.info("item updated id=%s", item.id)
@@ -358,35 +364,38 @@ def merge_item_into(db: Session, source_item_id: int, target_item_id: int) -> It
     DB owner) so nothing needs to be re-uploaded; only a redundant second
     thumbnail is actually deleted.
     """
-    source = db.get(Item, source_item_id)
-    target = db.get(Item, target_item_id)
-    if source is None:
-        raise NotFoundError("Item", source_item_id)
-    if target is None:
-        raise NotFoundError("Item", target_item_id)
+    # See db_write_lock's docstring -- RLock, so this is safe even when
+    # called from auto_merge_duplicate_products, which already holds it.
+    with db_write_lock:
+        source = db.get(Item, source_item_id)
+        target = db.get(Item, target_item_id)
+        if source is None:
+            raise NotFoundError("Item", source_item_id)
+        if target is None:
+            raise NotFoundError("Item", target_item_id)
 
-    for file in list(source.files):
-        if file.file_role == FileRole.THUMBNAIL:
-            if target.thumbnail_file is not None:
-                _delete_file_content(db, file, None)
-                source.files.remove(file)
-                db.delete(file)
-                continue
-        else:
-            file.file_role = FileRole.ATTACHMENT
-        # Re-parenting must go through the relationship collections, not
-        # just file.item_id -- source.files has cascade="all, delete-orphan"
-        # (see Item.files), which cascades from the *collection membership*
-        # at flush time, not the raw foreign key value. Setting item_id
-        # alone leaves `file` still logically inside source.files, so the
-        # db.delete(source) below would delete it right along with source
-        # regardless of what item_id says.
-        source.files.remove(file)
-        target.files.append(file)
+        for file in list(source.files):
+            if file.file_role == FileRole.THUMBNAIL:
+                if target.thumbnail_file is not None:
+                    _delete_file_content(db, file, None)
+                    source.files.remove(file)
+                    db.delete(file)
+                    continue
+            else:
+                file.file_role = FileRole.ATTACHMENT
+            # Re-parenting must go through the relationship collections, not
+            # just file.item_id -- source.files has cascade="all, delete-orphan"
+            # (see Item.files), which cascades from the *collection membership*
+            # at flush time, not the raw foreign key value. Setting item_id
+            # alone leaves `file` still logically inside source.files, so the
+            # db.delete(source) below would delete it right along with source
+            # regardless of what item_id says.
+            source.files.remove(file)
+            target.files.append(file)
 
-    db.delete(source)
-    db.commit()
-    db.refresh(target)
+        db.delete(source)
+        db.commit()
+        db.refresh(target)
     drive_sync_service.mark_dirty()
     logger.info("merged item id=%s into id=%s", source_item_id, target_item_id)
     return _to_read(target)
@@ -458,10 +467,13 @@ def merge_duplicate_group(db: Session, item_ids: list[int]) -> ItemDetail:
     the very same upload, so only one file should remain in the end.
     `item_ids` must already be ordered target-first -- as returned by
     find_duplicate_filename_groups."""
-    target_id, *duplicate_ids = item_ids
-    for duplicate_id in duplicate_ids:
-        delete_item(db, duplicate_id)
-    return get_item_detail(db, target_id)
+    # See db_write_lock's docstring -- RLock, so nesting into delete_item's
+    # own acquire below is safe.
+    with db_write_lock:
+        target_id, *duplicate_ids = item_ids
+        for duplicate_id in duplicate_ids:
+            delete_item(db, duplicate_id)
+        return get_item_detail(db, target_id)
 
 
 def auto_merge_duplicate_products(db: Session) -> int:
@@ -477,8 +489,8 @@ def auto_merge_duplicate_products(db: Session) -> int:
     # dedup loop) and can otherwise overlap with the other background
     # DB-writing flows (upload_sync_service, drive_sync_service,
     # drive_reconcile_service) closely enough to lose SQLite's busy_timeout
-    # race -- see background_write_lock's docstring.
-    with background_write_lock:
+    # race -- see db_write_lock's docstring.
+    with db_write_lock:
         duplicate_urls = db.execute(
             select(Item.product_url)
             .where(Item.product_url.is_not(None))
@@ -508,17 +520,20 @@ def delete_item(db: Session, item_id: int, *, drive_client: DriveClient | None =
     removed instead (nothing's reached Drive yet); a synced file also has
     any download-cache copy dropped, so it doesn't linger for its full TTL.
     """
-    item = db.get(Item, item_id)
-    if item is None:
-        raise NotFoundError("Item", item_id)
+    # See db_write_lock's docstring -- RLock, so this is safe even when
+    # called from merge_duplicate_group, which already holds it.
+    with db_write_lock:
+        item = db.get(Item, item_id)
+        if item is None:
+            raise NotFoundError("Item", item_id)
 
-    for file in item.files:
-        _delete_file_content(db, file, drive_client)
-        if file.drive_file_id:
-            local_cache_service.forget_download(file.drive_file_id)
+        for file in item.files:
+            _delete_file_content(db, file, drive_client)
+            if file.drive_file_id:
+                local_cache_service.forget_download(file.drive_file_id)
 
-    db.delete(item)
-    db.commit()
+        db.delete(item)
+        db.commit()
     drive_sync_service.mark_dirty()
     logger.info("item deleted id=%s", item_id)
 
@@ -542,24 +557,26 @@ def bulk_update(
     if not item_ids:
         return 0
 
-    status = _resolve_status(db, status_code) if status_code else None
-    add_tags = tag_service.get_or_create_tags(db, add_tag_names) if add_tag_names else []
-    add_avatars = avatar_service.resolve_existing_avatars(db, add_avatar_names) if add_avatar_names else []
+    # See db_write_lock's docstring.
+    with db_write_lock:
+        status = _resolve_status(db, status_code) if status_code else None
+        add_tags = tag_service.get_or_create_tags(db, add_tag_names) if add_tag_names else []
+        add_avatars = avatar_service.resolve_existing_avatars(db, add_avatar_names) if add_avatar_names else []
 
-    items = db.execute(select(Item).where(Item.id.in_(item_ids))).scalars().all()
-    for item in items:
-        if status is not None:
-            item.status = status
-        if add_tags:
-            existing_tag_ids = {t.id for t in item.tags}
-            item.tags = item.tags + [t for t in add_tags if t.id not in existing_tag_ids]
-        if add_avatars:
-            existing_avatar_ids = {a.id for a in item.avatars}
-            item.avatars = item.avatars + [a for a in add_avatars if a.id not in existing_avatar_ids]
-        if is_favorite is not None:
-            item.is_favorite = is_favorite
+        items = db.execute(select(Item).where(Item.id.in_(item_ids))).scalars().all()
+        for item in items:
+            if status is not None:
+                item.status = status
+            if add_tags:
+                existing_tag_ids = {t.id for t in item.tags}
+                item.tags = item.tags + [t for t in add_tags if t.id not in existing_tag_ids]
+            if add_avatars:
+                existing_avatar_ids = {a.id for a in item.avatars}
+                item.avatars = item.avatars + [a for a in add_avatars if a.id not in existing_avatar_ids]
+            if is_favorite is not None:
+                item.is_favorite = is_favorite
 
-    db.commit()
+        db.commit()
     if items:
         drive_sync_service.mark_dirty()
     logger.info("bulk update applied to %d item(s)", len(items))
@@ -567,11 +584,13 @@ def bulk_update(
 
 
 def add_update_check(db: Session, item_id: int, note: str | None) -> None:
-    item = db.get(Item, item_id)
-    if item is None:
-        raise NotFoundError("Item", item_id)
-    db.add(UpdateHistory(item_id=item.id, note=note))
-    db.commit()
+    # See db_write_lock's docstring.
+    with db_write_lock:
+        item = db.get(Item, item_id)
+        if item is None:
+            raise NotFoundError("Item", item_id)
+        db.add(UpdateHistory(item_id=item.id, note=note))
+        db.commit()
     drive_sync_service.mark_dirty()
     logger.info("update check recorded for item id=%s", item.id)
 
@@ -629,97 +648,107 @@ def create_item_with_file(
 ) -> ItemRead:
     resolved_thumbnail = _resolve_thumbnail(data, thumbnail_upload)
     moved_cache_paths: list[Path] = []
-    try:
+    # Held from here to the end (not just around the commit): a request-path
+    # write runs on its own threadpool thread just like the background
+    # DB-writing flows, and uploading several files at once -- the whole
+    # point of the TOP page's multi-file drag-and-drop -- fires that many
+    # concurrent calls here, each also scheduling its own fire-and-forget
+    # upload_sync_service push. That's enough concurrent contention to lose
+    # SQLite's busy_timeout race -- see db_write_lock's docstring. Acquired
+    # after _resolve_thumbnail's possible BOOTH network fetch above (no DB
+    # access, no need to hold the lock through it).
+    with db_write_lock:
         try:
-            shop = shop_service.get_or_create_shop(db, name=data.shop_name, url=data.shop_url)
-            tags = tag_service.get_or_create_tags(db, data.tags)
-            avatars = avatar_service.resolve_existing_avatars(db, data.avatars)
-            status = _resolve_status(db, data.status_code)
-            item = Item(
-                shop=shop,
-                name=data.name,
-                category=data.category,
-                product_url=data.product_url,
-                download_source_url=data.download_source_url,
-                purchase_date=data.purchase_date,
-                download_date=data.download_date,
-                price=data.price,
-                file_format=primary_upload.extension.lstrip("."),
-                status=status,
-                description=data.description,
-                memo=data.memo,
-                is_favorite=data.is_favorite,
-                tags=tags,
-                avatars=avatars,
-            )
-            db.add(item)
-            db.flush()
-
-            primary_cache_path = _cache_upload_locally(primary_upload)
-            moved_cache_paths.append(primary_cache_path)
-            primary_file = ItemFile(
-                item_id=item.id,
-                file_role=FileRole.PRIMARY,
-                original_filename=primary_upload.original_filename,
-                stored_filename=primary_cache_path.name,
-                content_type=primary_upload.content_type,
-                size_bytes=primary_upload.size_bytes,
-            )
-            db.add(primary_file)
-
-            thumbnail_file = None
-            if resolved_thumbnail is not None:
-                thumb_cache_path = _cache_upload_locally(resolved_thumbnail.upload)
-                moved_cache_paths.append(thumb_cache_path)
-                thumbnail_file = ItemFile(
-                    item_id=item.id,
-                    file_role=FileRole.THUMBNAIL,
-                    original_filename=resolved_thumbnail.upload.original_filename,
-                    stored_filename=thumb_cache_path.name,
-                    content_type=resolved_thumbnail.upload.content_type,
-                    size_bytes=resolved_thumbnail.upload.size_bytes,
+            try:
+                shop = shop_service.get_or_create_shop(db, name=data.shop_name, url=data.shop_url)
+                tags = tag_service.get_or_create_tags(db, data.tags)
+                avatars = avatar_service.resolve_existing_avatars(db, data.avatars)
+                status = _resolve_status(db, data.status_code)
+                item = Item(
+                    shop=shop,
+                    name=data.name,
+                    category=data.category,
+                    product_url=data.product_url,
+                    download_source_url=data.download_source_url,
+                    purchase_date=data.purchase_date,
+                    download_date=data.download_date,
+                    price=data.price,
+                    file_format=primary_upload.extension.lstrip("."),
+                    status=status,
+                    description=data.description,
+                    memo=data.memo,
+                    is_favorite=data.is_favorite,
+                    tags=tags,
+                    avatars=avatars,
                 )
-                db.add(thumbnail_file)
+                db.add(item)
+                db.flush()
 
-            db.add(
-                License(
+                primary_cache_path = _cache_upload_locally(primary_upload)
+                moved_cache_paths.append(primary_cache_path)
+                primary_file = ItemFile(
                     item_id=item.id,
-                    commercial_use=data.commercial_use,
-                    modification_allowed=data.modification_allowed,
-                    redistribution_allowed=data.redistribution_allowed,
-                    credit_required=data.credit_required,
-                    note=data.license_note,
+                    file_role=FileRole.PRIMARY,
+                    original_filename=primary_upload.original_filename,
+                    stored_filename=primary_cache_path.name,
+                    content_type=primary_upload.content_type,
+                    size_bytes=primary_upload.size_bytes,
                 )
-            )
+                db.add(primary_file)
 
-            db.commit()
+                thumbnail_file = None
+                if resolved_thumbnail is not None:
+                    thumb_cache_path = _cache_upload_locally(resolved_thumbnail.upload)
+                    moved_cache_paths.append(thumb_cache_path)
+                    thumbnail_file = ItemFile(
+                        item_id=item.id,
+                        file_role=FileRole.THUMBNAIL,
+                        original_filename=resolved_thumbnail.upload.original_filename,
+                        stored_filename=thumb_cache_path.name,
+                        content_type=resolved_thumbnail.upload.content_type,
+                        size_bytes=resolved_thumbnail.upload.size_bytes,
+                    )
+                    db.add(thumbnail_file)
+
+                db.add(
+                    License(
+                        item_id=item.id,
+                        commercial_use=data.commercial_use,
+                        modification_allowed=data.modification_allowed,
+                        redistribution_allowed=data.redistribution_allowed,
+                        credit_required=data.credit_required,
+                        note=data.license_note,
+                    )
+                )
+
+                db.commit()
+                db.refresh(item)
+            except Exception:
+                db.rollback()
+                # Nothing committed, so any file already moved into the pending
+                # cache would otherwise be orphaned (no DB row will ever point
+                # at it).
+                for path in moved_cache_paths:
+                    path.unlink(missing_ok=True)
+                raise
+        finally:
+            # Best-effort BOOTH-fetched thumbnail cleanup: a no-op if it was
+            # already moved into the pending-upload cache above, so this only
+            # actually deletes anything if caching failed partway through.
+            if resolved_thumbnail is not None and resolved_thumbnail.owned:
+                resolved_thumbnail.upload.path.unlink(missing_ok=True)
+
+        drive_sync_service.mark_dirty()
+
+        # No Drive call above -- the file(s) just sit in the pending-upload cache
+        # until upload_sync_service's background loop pushes them. A caller that
+        # explicitly hands us a drive_client (tests, or anything that wants
+        # synchronous/deterministic behavior) gets that push done immediately instead.
+        if drive_client is not None:
+            upload_sync_service.sync_item_file(db, primary_file.id, drive_client)
+            if thumbnail_file is not None:
+                upload_sync_service.sync_item_file(db, thumbnail_file.id, drive_client)
             db.refresh(item)
-        except Exception:
-            db.rollback()
-            # Nothing committed, so any file already moved into the pending
-            # cache would otherwise be orphaned (no DB row will ever point
-            # at it).
-            for path in moved_cache_paths:
-                path.unlink(missing_ok=True)
-            raise
-    finally:
-        # Best-effort BOOTH-fetched thumbnail cleanup: a no-op if it was
-        # already moved into the pending-upload cache above, so this only
-        # actually deletes anything if caching failed partway through.
-        if resolved_thumbnail is not None and resolved_thumbnail.owned:
-            resolved_thumbnail.upload.path.unlink(missing_ok=True)
-
-    drive_sync_service.mark_dirty()
-
-    # No Drive call above -- the file(s) just sit in the pending-upload cache
-    # until upload_sync_service's background loop pushes them. A caller that
-    # explicitly hands us a drive_client (tests, or anything that wants
-    # synchronous/deterministic behavior) gets that push done immediately instead.
-    if drive_client is not None:
-        upload_sync_service.sync_item_file(db, primary_file.id, drive_client)
-        if thumbnail_file is not None:
-            upload_sync_service.sync_item_file(db, thumbnail_file.id, drive_client)
-        db.refresh(item)
 
     logger.info("item created id=%s name=%s", item.id, item.name)
     return _to_read(item)

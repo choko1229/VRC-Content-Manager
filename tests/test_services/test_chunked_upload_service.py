@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from starlette.requests import ClientDisconnect
 
 from app.core.validation import UploadValidationError
 from app.services import chunked_upload_service
@@ -90,6 +91,24 @@ def test_abort_session_cleans_up_directory() -> None:
     assert not session.dir_path.exists()
     with pytest.raises(UploadValidationError):
         chunked_upload_service._get_session(upload_id)
+
+
+class _DisconnectingRequest:
+    """Minimal stand-in for starlette.requests.Request whose body stream
+    drops partway through, like a real browser tab closing mid-upload."""
+
+    async def stream(self):
+        yield b"partial data"
+        raise ClientDisconnect()
+
+
+async def test_write_chunk_swallows_client_disconnect_and_cleans_up_partial_file() -> None:
+    upload_id = chunked_upload_service.init_session(filename="asset.zip", total_size=100, max_size_mb=500)
+    session = chunked_upload_service._get_session(upload_id)
+
+    await chunked_upload_service.write_chunk(upload_id, 0, _DisconnectingRequest())  # must not raise
+
+    assert list(session.dir_path.glob("*.part")) == []
 
 
 def test_purge_stale_sessions_removes_only_old_sessions() -> None:
