@@ -36,6 +36,14 @@ class InstanceConfig(BaseModel):
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = ""
     app_login_password: str = ""
+    # The user's own accounts.booth.pm session cookie (Cookie header value,
+    # pasted in from their browser's devtools -- see
+    # app/services/booth_library_service.py), used to fetch their purchase
+    # library for high-confidence BoothURL suggestions. A live session
+    # credential, not a scoped API key, so it lives here rather than in the
+    # Drive-synced database for the same reason the OAuth client secret
+    # does -- see the module docstring above.
+    booth_library_cookie: str = ""
 
     @property
     def oauth_configured(self) -> bool:

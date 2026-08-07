@@ -96,6 +96,45 @@
 {% endcall %}
 
 {% call ui.glass(extra="mb-6") %}
+<h2 class="text-lg font-medium mb-3">BOOTHライブラリ連携</h2>
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-2">
+  あなた自身のBOOTH購入履歴(ライブラリ)を取り込み、アップロードしたファイル名が実際に購入したファイルと完全一致する場合に、
+  高精度なBoothURL候補として提案します(公開検索より確実です)。
+</p>
+<p class="text-xs text-amber-600 dark:text-amber-400 mb-4 flex items-start gap-1.5">
+  <span class="icon text-[0.95rem] mt-0.5 shrink-0" aria-hidden="true">warning</span>
+  <span>
+    ログインセッションの情報(Cookie)を保存するため、漏洩するとBOOTHアカウントを操作されるリスクがあります。
+    このアプリの他の設定と同様Driveには同期されず、このサーバーにのみ保存されますが、
+    信頼できる環境でのみ使用し、不要になったら下のフォームを空欄のまま保存して消去してください。
+  </span>
+</p>
+{% if booth_library_error %}{{ ui.alert(booth_library_error, variant="error") }}{% endif %}
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-1">
+  Cookie: {% if booth_library_cookie_set %}設定済み{% else %}未設定{% endif %}
+</p>
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-4">
+  ライブラリ: {{ booth_library_item_count }}件のファイルを同期済み(最終同期: {{ booth_library_synced_at or "まだ同期していません" }})
+</p>
+<form method="post" action="/settings/booth-library-cookie" class="space-y-3 mb-4">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  {{ ui.text_field("booth_library_cookie", "BOOTHセッションCookie", type="password",
+      help_text="accounts.booth.pm/library を開いた状態でブラウザの開発者ツール→Networkタブ→libraryへのリクエストのRequest HeadersにあるCookie値を貼り付けてください。空欄で保存すると削除します。") }}
+  <div class="flex flex-wrap items-center gap-3">
+    {{ ui.btn("保存", variant="secondary", icon="save", type="submit") }}
+  </div>
+</form>
+<div id="booth-library-sync-result" aria-live="polite"></div>
+<div class="flex flex-wrap items-center gap-3">
+  {{ ui.btn("ライブラリを同期", variant="primary", icon="sync", type="button",
+      attrs='hx-post="/fragments/settings/booth-library/sync" hx-target="#booth-library-sync-result" hx-swap="innerHTML" hx-indicator="#booth-library-sync-indicator" hx-disabled-elt="this"') }}
+  <span id="booth-library-sync-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
+    <span class="icon text-[1rem] animate-spin" aria-hidden="true">progress_activity</span>同期中…
+  </span>
+</div>
+{% endcall %}
+
+{% call ui.glass(extra="mb-6") %}
 <h2 class="text-lg font-medium mb-4">ショップ管理</h2>
 <form class="grid gap-4 sm:grid-cols-3 sm:items-end mb-5" hx-post="/fragments/shops" hx-target="#shop-list" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()" aria-label="ショップ追加フォーム">
   {{ ui.text_field("name", "ショップ名", required=True) }}

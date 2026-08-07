@@ -35,6 +35,19 @@
     <p id="fetch-info-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
       <span class="icon text-[1rem]" aria-hidden="true">progress_activity</span>取得中…
     </p>
+    {# Zero-click, local-only check: does this item's uploaded filename
+       exactly match a file in the user's own BOOTH purchase library (see
+       booth_library_service)? Far higher confidence than the public-search
+       button below, since it's not a guess -- the file is *known* to have
+       come from that product. Renders nothing if there's no library synced,
+       no match, or the item is already linked. hx-target="this" is
+       required (not just harmless belt-and-braces): hx-target inherits
+       down the DOM tree in htmx, and without overriding it here this div
+       would inherit the enclosing <form>'s hx-target="this" -- silently
+       swapping the *form's* innerHTML with this div's tiny response and
+       wiping out every other field the moment this request resolves. #}
+    <div id="booth-library-match" hx-get="/fragments/items/{{ item_id }}/booth-library-match"
+         hx-trigger="load" hx-target="this" hx-swap="innerHTML"></div>
     {# Searches BOOTH using the *current* value of the title field below
        (hx-vals reads it live at click time, not a value baked into this
        button at panel-render time) -- otherwise editing the filename-derived

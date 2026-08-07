@@ -11,7 +11,14 @@ from app.core.csrf import verify_csrf
 from app.core.instance_config import save as save_instance_config
 from app.db.session import get_db
 from app.drive import folder_layout
-from app.services import app_config_service, app_settings_service, drive_sync_service, oauth_service, shop_service
+from app.services import (
+    app_config_service,
+    app_settings_service,
+    booth_library_service,
+    drive_sync_service,
+    oauth_service,
+    shop_service,
+)
 from app.web.templating import templates
 
 router = APIRouter()
@@ -110,11 +117,15 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
             "google_oauth_client_id": config.google_oauth_client_id,
             "google_oauth_redirect_uri": config.google_oauth_redirect_uri,
             "app_login_password_set": bool(config.app_login_password),
+            "booth_library_cookie_set": bool(config.booth_library_cookie),
+            "booth_library_synced_at": app_settings_service.get_setting(db, "booth_library_synced_at"),
+            "booth_library_item_count": booth_library_service.library_size(db),
             "shops": shop_service.list_shops(db),
             "root_folder_name": folder_layout.ROOT_FOLDER_NAME,
             "oauth_error": None,
             "password_error": None,
             "operational_error": None,
+            "booth_library_error": None,
         },
     )
 
@@ -151,6 +162,16 @@ def update_login_password(request: Request, app_login_password: str = Form(""), 
     return RedirectResponse(url="/settings", status_code=303)
 
 
+@router.post("/settings/booth-library-cookie", dependencies=[Depends(verify_csrf)])
+def update_booth_library_cookie(request: Request, booth_library_cookie: str = Form(""), db: Session = Depends(get_db)):
+    settings = get_settings()
+    config = get_instance_config()
+    config.booth_library_cookie = booth_library_cookie.strip()
+    save_instance_config(settings.data_dir, config)
+    logger.info("BOOTH library cookie %s via /settings", "set" if config.booth_library_cookie else "cleared")
+    return RedirectResponse(url="/settings", status_code=303)
+
+
 @router.post("/settings/operational", dependencies=[Depends(verify_csrf)])
 def update_operational_settings(
     request: Request,
@@ -179,6 +200,7 @@ def _settings_response(
     oauth_error: str | None = None,
     password_error: str | None = None,
     operational_error: str | None = None,
+    booth_library_error: str | None = None,
 ):
     config = get_instance_config()
     return templates.TemplateResponse(
@@ -194,11 +216,15 @@ def _settings_response(
             "google_oauth_client_id": config.google_oauth_client_id,
             "google_oauth_redirect_uri": config.google_oauth_redirect_uri,
             "app_login_password_set": bool(config.app_login_password),
+            "booth_library_cookie_set": bool(config.booth_library_cookie),
+            "booth_library_synced_at": app_settings_service.get_setting(db, "booth_library_synced_at"),
+            "booth_library_item_count": booth_library_service.library_size(db),
             "shops": shop_service.list_shops(db),
             "root_folder_name": folder_layout.ROOT_FOLDER_NAME,
             "oauth_error": oauth_error,
             "password_error": password_error,
             "operational_error": operational_error,
+            "booth_library_error": booth_library_error,
         },
         status_code=422,
     )

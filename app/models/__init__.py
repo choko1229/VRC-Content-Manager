@@ -3,6 +3,7 @@
 from app.db.base import Base
 from app.models.app_setting import AppSetting
 from app.models.avatar import Avatar, item_avatars
+from app.models.booth_library_file import BoothLibraryFile
 from app.models.item import Item, ItemCategory
 from app.models.item_dependency import ItemDependency
 from app.models.item_file import FileRole, ItemFile
@@ -18,6 +19,7 @@ __all__ = [
     "AppSetting",
     "Avatar",
     "item_avatars",
+    "BoothLibraryFile",
     "Item",
     "ItemCategory",
     "ItemDependency",

@@ -4,10 +4,18 @@ from fastapi import APIRouter, Depends, Form, Request
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from app.config import get_instance_config
 from app.core.csrf import verify_csrf
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
-from app.services import drive_reconcile_service, drive_sync_service, integrity_service, item_service, oauth_service
+from app.services import (
+    booth_library_service,
+    drive_reconcile_service,
+    drive_sync_service,
+    integrity_service,
+    item_service,
+    oauth_service,
+)
 from app.web.templating import templates
 
 router = APIRouter(prefix="/fragments/settings", dependencies=[Depends(verify_csrf)])
@@ -67,6 +75,37 @@ async def drive_reconcile(request: Request, db: Session = Depends(get_db)):
             status_code=502,
         )
     return templates.TemplateResponse(request, "partials/drive_reconcile.html", {"result": result, "error": None})
+
+
+@router.post("/booth-library/sync")
+async def sync_booth_library(request: Request, db: Session = Depends(get_db)):
+    config = get_instance_config()
+    if not config.booth_library_cookie:
+        return templates.TemplateResponse(
+            request, "partials/booth_library_sync.html", {"message": "Cookieが未設定です。", "is_error": True}
+        )
+
+    try:
+        count = await run_in_threadpool(booth_library_service.sync_library, db, config.booth_library_cookie)
+    except booth_library_service.BoothSessionExpiredError:
+        return templates.TemplateResponse(
+            request,
+            "partials/booth_library_sync.html",
+            {"message": "セッションが無効です。Cookieを再設定してください。", "is_error": True},
+        )
+    except Exception:
+        return templates.TemplateResponse(
+            request,
+            "partials/booth_library_sync.html",
+            {"message": "同期中にエラーが発生しました。時間をおいて再度お試しください。", "is_error": True},
+            status_code=502,
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "partials/booth_library_sync.html",
+        {"message": f"{count}件のファイルを同期しました。", "is_error": False},
+    )
 
 
 @router.post("/duplicate-files/scan")

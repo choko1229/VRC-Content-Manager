@@ -21,6 +21,7 @@ from app.services import (
     app_config_service,
     avatar_service,
     booth_info_service,
+    booth_library_service,
     item_service,
     shop_service,
     tag_service,
@@ -257,6 +258,24 @@ def edit_item_panel_fragment(request: Request, item_id: int, db: Session = Depen
         avatar_form_values=avatar_form_values,
     )
     return templates.TemplateResponse(request, "items/_edit_panel.html", context)
+
+
+@router.get("/{item_id}/booth-library-match")
+def booth_library_match_fragment(request: Request, item_id: int, db: Session = Depends(get_db)):
+    # Auto-run on edit-panel load (see items/_edit_panel.html) -- unlike the
+    # manual "ファイル名で検索" button, this is a plain local DB lookup (no
+    # network fetch), so there's no cost to always checking. Renders nothing
+    # if the item is already linked or there's no exact filename match.
+    try:
+        detail = item_service.get_item_detail(db, item_id)
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="商品が見つかりません。")
+
+    match = None
+    if not detail.product_url and detail.primary_file_name:
+        match = booth_library_service.find_by_filename(db, detail.primary_file_name)
+
+    return templates.TemplateResponse(request, "items/_booth_library_match.html", {"match": match})
 
 
 @router.post("/{item_id}/edit", dependencies=[Depends(verify_csrf)])
