@@ -403,12 +403,21 @@
          - 反映 (js-booth-preview-apply) fills BoothURL and fires the same
            "change" a hand-pasted URL would, reusing the existing
            fetch-info lookup instead of duplicating it, then closes the
-           modal. Also fires "focusout" -- the edit form's own autosave
-           (items/_edit_panel.html: hx-trigger="focusout, change from:
-           #f-thumbnail") only listens for a real focus loss, which a
-           programmatic value+change never produces, so without this the
-           field would visibly show the new URL but never actually save
-           until the user happened to click into some other field.
+           modal. Also fires "focusout" once that fetch-info request
+           finishes -- the edit form's own autosave (items/_edit_panel.html:
+           hx-trigger="focusout, change from:#f-thumbnail") only listens for
+           a real focus loss, which a programmatic value+change never
+           produces, so without this the field would visibly show the new
+           URL but never actually save. Waiting for fetch-info's own
+           htmx:afterRequest (rather than firing focusout immediately) is
+           required, not just tidy: fetch-info is a real network round trip
+           to BOOTH (hundreds of ms+), while the form's own save posts to
+           this app's local server (usually well under 100ms) -- firing
+           focusout right away would save BEFORE fetch-info's thumbnail/
+           title/shop/description OOB-updates land, silently discarding all
+           of them (only the BoothURL field itself, set synchronously above,
+           would end up persisted). afterRequest fires on failure too, so a
+           bad fetch still lets the BoothURL itself save.
          - キャンセル (js-booth-preview-cancel) closes the modal AND clears
            the candidate list's contents -- "never mind, none of these".
            Empties #booth-suggestions rather than removing it, since the
@@ -426,8 +435,12 @@
         if (field) {
           field.value = applyBtn.dataset.productUrl;
           field.dispatchEvent(new Event("input", { bubbles: true }));
+          field.addEventListener("htmx:afterRequest", function onFetchInfoDone(evt) {
+            if (evt.detail.elt !== field) return;
+            field.removeEventListener("htmx:afterRequest", onFetchInfoDone);
+            field.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+          });
           field.dispatchEvent(new Event("change", { bubbles: true }));
-          field.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
         }
         closeBoothPreviewModal();
         return;
