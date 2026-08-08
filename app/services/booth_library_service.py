@@ -1,9 +1,18 @@
 """Cross-references an uploaded file's original filename against the user's
-own BOOTH purchase library (accounts.booth.pm/library), to suggest a BoothURL
-with much higher confidence than the public keyword search
-(booth_info_service.search_products) can offer: an exact filename match
-means the file is *known* to have come from that exact product, not just
-plausibly related to it.
+own BOOTH purchase library (accounts.booth.pm/library and .../free_downloads),
+to suggest a BoothURL with much higher confidence than the public keyword
+search (booth_info_service.search_products) can offer: an exact filename
+match means the file is *known* to have come from that exact product, not
+just plausibly related to it.
+
+The two listings have different markup: purchased-item cards list every
+file inline, but free-download cards don't -- BOOTH only prints those on
+the product's own page (one per downloadable "variation"; a product can
+have several, and some may be paid variations sitting alongside the free
+one with no filename at all). So syncing free downloads costs one extra
+page fetch per product on top of the listing pages themselves -- still
+within this module's "authenticated, user-triggered only" fetch policy
+(see below), just a heavier version of it.
 
 This requires an authenticated request (the library page is login-gated),
 so unlike the rest of the booth_* services this one needs a session cookie
@@ -99,35 +108,97 @@ def _parse_page(html: str) -> list[BoothLibraryEntry]:
     return entries
 
 
-def _fetch_page(client: httpx.Client, cookie: str, page: int) -> list[BoothLibraryEntry]:
-    url = f"https://accounts.booth.pm/library?page={page}"
-    response = client.get(url, headers={"Cookie": cookie})
-    response.raise_for_status()
-    if response.url.path.startswith("/users/sign_in"):
-        raise BoothSessionExpiredError
-    return _parse_page(response.text)
+# Free-download listing cards carry no filename of their own -- see the
+# module docstring -- so BoothLibraryEntry.filenames starts empty for them
+# and gets backfilled from the product's own page via this selector. Not
+# every .variation-cart on that page has one: a product can offer several
+# variations (colors, sizes, ...), only some of which are the free one this
+# library entry refers to; the rest (paid variations) have no filename div
+# at all and are skipped naturally.
+_PRODUCT_PAGE_FILENAME_SELECTOR = "div.text-14.text-text-default.font-normal.text-left"
+
+
+def _parse_product_page_filenames(html: str) -> list[str]:
+    soup = BeautifulSoup(html, "html.parser")
+    filenames = []
+    for cart in soup.select(".variation-cart"):
+        el = cart.select_one(_PRODUCT_PAGE_FILENAME_SELECTOR)
+        text = el.get_text(strip=True) if el else None
+        if text:
+            filenames.append(text)
+    return filenames
+
+
+def _fetch_product_filenames(client: httpx.Client, cookie: str, product_url: str) -> list[str]:
+    if not robots_allow(product_url, client=client):
+        logger.info("robots.txt disallows fetching %s; skipping filename lookup for this free download", product_url)
+        return []
+    try:
+        response = client.get(product_url, headers={"Cookie": cookie})
+        response.raise_for_status()
+    except httpx.HTTPError:
+        logger.warning("booth_library_service: failed to fetch free-download product page %s", product_url, exc_info=True)
+        return []
+    return _parse_product_page_filenames(response.text)
+
+
+def _paginate(
+    client: httpx.Client, cookie: str, base_url: str, *, backfill_filenames: bool
+) -> list[BoothLibraryEntry]:
+    """Shared pagination loop for both listings: pages until one comes back
+    with no product cards (confirmed: BOOTH returns 200 with an empty list
+    past the last page rather than erroring), raising
+    BoothSessionExpiredError the moment a page redirects to the login page
+    instead. `backfill_filenames` is only set for the free-downloads
+    listing -- see the module docstring for why."""
+    all_entries: list[BoothLibraryEntry] = []
+    for page in range(1, _MAX_PAGES + 1):
+        response = client.get(f"{base_url}?page={page}", headers={"Cookie": cookie})
+        response.raise_for_status()
+        if response.url.path.startswith("/users/sign_in"):
+            raise BoothSessionExpiredError
+        page_entries = _parse_page(response.text)
+        if not page_entries:
+            break
+        if backfill_filenames:
+            for entry in page_entries:
+                entry.filenames = _fetch_product_filenames(client, cookie, entry.product_url)
+        all_entries.extend(page_entries)
+    return all_entries
 
 
 def fetch_library(cookie: str, *, client: httpx.Client | None = None) -> list[BoothLibraryEntry]:
-    """Paginates accounts.booth.pm/library?page=1,2,... until a page comes
-    back with no product cards (confirmed: BOOTH returns 200 with an empty
-    list past the last page rather than erroring). Raises
-    BoothSessionExpiredError the moment a page redirects to the login page
-    instead. `client` is injectable for tests (httpx.MockTransport);
-    production callers omit it.
-    """
+    """Paginates accounts.booth.pm/library?page=1,2,... (purchased items --
+    each card already lists every file inline). `client` is injectable for
+    tests (httpx.MockTransport); production callers omit it."""
     if not robots_allow("https://accounts.booth.pm/library"):
         logger.info("robots.txt disallows fetching accounts.booth.pm/library; skipping library sync")
         return []
 
     def _run(active_client: httpx.Client) -> list[BoothLibraryEntry]:
-        all_entries: list[BoothLibraryEntry] = []
-        for page in range(1, _MAX_PAGES + 1):
-            page_entries = _fetch_page(active_client, cookie, page)
-            if not page_entries:
-                break
-            all_entries.extend(page_entries)
-        return all_entries
+        return _paginate(active_client, cookie, "https://accounts.booth.pm/library", backfill_filenames=False)
+
+    if client is not None:
+        return _run(client)
+    with make_client() as owned_client:
+        return _run(owned_client)
+
+
+def fetch_free_downloads(cookie: str, *, client: httpx.Client | None = None) -> list[BoothLibraryEntry]:
+    """Paginates accounts.booth.pm/library/free_downloads?page=1,2,...,
+    fetching each product's own page to fill in filenames (see the module
+    docstring). A single product page fetch failing just leaves that one
+    entry with no filenames -- best-effort, matching the rest of this
+    module -- rather than failing the whole sync. `client` is injectable
+    for tests; production callers omit it."""
+    if not robots_allow("https://accounts.booth.pm/library/free_downloads"):
+        logger.info("robots.txt disallows fetching accounts.booth.pm/library/free_downloads; skipping")
+        return []
+
+    def _run(active_client: httpx.Client) -> list[BoothLibraryEntry]:
+        return _paginate(
+            active_client, cookie, "https://accounts.booth.pm/library/free_downloads", backfill_filenames=True
+        )
 
     if client is not None:
         return _run(client)
@@ -136,12 +207,12 @@ def fetch_library(cookie: str, *, client: httpx.Client | None = None) -> list[Bo
 
 
 def sync_library(db: Session, cookie: str, *, client: httpx.Client | None = None) -> int:
-    """Fetches the full library and replaces booth_library_files wholesale.
-    Returns the number of (product, filename) rows stored. Raises
-    BoothSessionExpiredError if the cookie no longer authenticates -- the
-    table is left untouched in that case (nothing is deleted until a fetch
-    has actually succeeded)."""
-    entries = fetch_library(cookie, client=client)
+    """Fetches both the purchased-items and free-downloads libraries and
+    replaces booth_library_files wholesale. Returns the number of (product,
+    filename) rows stored. Raises BoothSessionExpiredError if the cookie no
+    longer authenticates -- the table is left untouched in that case
+    (nothing is deleted until both fetches have actually succeeded)."""
+    entries = fetch_library(cookie, client=client) + fetch_free_downloads(cookie, client=client)
 
     with db_write_lock:
         db.execute(delete(BoothLibraryFile))
