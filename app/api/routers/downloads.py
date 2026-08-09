@@ -57,6 +57,7 @@ def _serve_file(db: Session, item_id: int, file: ItemFile):
 
 
 @router.get("/items/{item_id}/download")
+@router.head("/items/{item_id}/download")
 def download_item_file(item_id: int, db: Session = Depends(get_db)):
     item = db.get(Item, item_id)
     if item is None:
@@ -70,10 +71,19 @@ def download_item_file(item_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/items/{item_id}/files/{file_id}/download")
+@router.head("/items/{item_id}/files/{file_id}/download")
 def download_item_attachment_file(item_id: int, file_id: int, db: Session = Depends(get_db)):
     """Downloads one file from an item that has more than one -- e.g. a
     duplicate-BoothURL upload folded in as an ATTACHMENT via
-    item_service.merge_item_into rather than replacing the primary file."""
+    item_service.merge_item_into rather than replacing the primary file.
+
+    Both routes above also accept HEAD (see base.html's download-feedback
+    script): it runs this exact same body -- including the potentially slow
+    resolve_local_path Drive fetch/cache-warm and its rate-limit retries --
+    but FileResponse skips writing the body for a HEAD request, so the
+    client can await the real "is this ready, or did it fail" signal (and
+    show a toast the whole time) without transferring the file twice.
+    """
     file = db.get(ItemFile, file_id)
     if file is None or file.item_id != item_id:
         raise HTTPException(status_code=404, detail="ファイルが見つかりません。")

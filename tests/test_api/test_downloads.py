@@ -7,11 +7,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.session import get_db
+from app.db.session import get_db, get_sessionmaker
 from app.drive.fake_drive_client import FakeDriveClient
 from app.main import app
+from app.models.item_file import FileRole, ItemFile
 from app.schemas.item import ItemCreate
-from app.services import item_service, oauth_service
+from app.services import item_service, local_cache_service, oauth_service
 from app.services.upload_service import ValidatedUpload
 
 
@@ -75,6 +76,69 @@ def test_download_item_file_nests_filename_under_app_subfolder(client_with_item)
     # whichever Content-Disposition form (plain filename= vs percent-encoded
     # filename*=utf-8'') gets used -- it's what Chromium keys off of.
     assert "%2F" not in disposition.upper()
+
+
+def test_download_item_file_head_warms_cache_with_no_body(client_with_item) -> None:
+    # See base.html's download-feedback script: it HEADs this same URL first
+    # (to show a toast through the wait and surface a real error) before
+    # triggering the actual native download -- so HEAD must run the same
+    # resolve_local_path/cache-warming work GET does, just without a body.
+    client, item_id = client_with_item
+
+    response = client.head(f"/api/v1/items/{item_id}/download")
+
+    assert response.status_code == 200
+    assert response.content == b""
+    assert "model.vrm" in response.headers["content-disposition"]
+    assert response.headers.get("content-length") == str(len(b"vrm file bytes"))
+
+    # And the cache it warmed is what the follow-up GET actually serves.
+    get_response = client.get(f"/api/v1/items/{item_id}/download")
+    assert get_response.status_code == 200
+    assert get_response.content == b"vrm file bytes"
+
+
+def test_download_nonexistent_item_head_returns_404_with_no_body(client_with_item) -> None:
+    client, _item_id = client_with_item
+
+    response = client.head("/api/v1/items/999999/download")
+
+    assert response.status_code == 404
+    assert response.content == b""
+
+
+def test_download_attachment_file_head_and_get(client_with_item) -> None:
+    # download_item_attachment_file is a separate route from the primary-
+    # file one above (the @router.head stacking has to be repeated on it
+    # too) -- covers e.g. a duplicate-BoothURL upload folded in as an
+    # ATTACHMENT via item_service.merge_item_into.
+    client, item_id = client_with_item
+    session_local = get_sessionmaker()
+    db = session_local()
+    try:
+        local_cache_service.pending_upload_path("attachment-stored.zip").write_bytes(b"attachment bytes")
+        attachment = ItemFile(
+            item_id=item_id,
+            file_role=FileRole.ATTACHMENT,
+            original_filename="attachment.zip",
+            stored_filename="attachment-stored.zip",
+            content_type="application/zip",
+            size_bytes=len(b"attachment bytes"),
+        )
+        db.add(attachment)
+        db.commit()
+        file_id = attachment.id
+    finally:
+        db.close()
+
+    head_response = client.head(f"/api/v1/items/{item_id}/files/{file_id}/download")
+    assert head_response.status_code == 200
+    assert head_response.content == b""
+    assert "attachment.zip" in head_response.headers["content-disposition"]
+
+    get_response = client.get(f"/api/v1/items/{item_id}/files/{file_id}/download")
+    assert get_response.status_code == 200
+    assert get_response.content == b"attachment bytes"
 
 
 def test_download_item_file_populates_and_reuses_download_cache(client_with_item) -> None:

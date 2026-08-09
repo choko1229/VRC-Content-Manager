@@ -276,19 +276,34 @@
        <a href> tags -- a native, browser-driven download normally gives no
        feedback at all inside the page itself, and on a server error (no
        Content-Disposition on that response) the browser would just
-       navigate the whole page away to show raw JSON. Intercepting the
-       click and fetching the same URL instead gives: a progress toast for
-       the whole (possibly long, if a Drive rate limit is being retried --
-       see GoogleDriveClient.download_file) wait, graceful error handling,
-       and a definite "done" signal -- then triggers the actual save via a
-       blob URL, keeping the same "VRC Content Manager/<filename>" path
-       (see app/api/routers/downloads.py) so it still lands in the same
-       Downloads subfolder. Delegated on `document` so it keeps working
-       after htmx swaps the list/detail panel back in.
+       navigate the whole page away to show raw JSON.
+
+       Intercepting the click to HEAD the same URL first (both download
+       routes accept HEAD -- see app/api/routers/downloads.py) runs the
+       exact same server-side work (including the potentially long wait if
+       a Drive rate limit is being retried, see GoogleDriveClient.
+       download_file) and warms the local cache, but with no response body
+       to transfer -- so a toast can track the whole wait and surface a
+       real error, and only once that resolves does the *actual* download
+       fire, via a completely normal <a href> click (no `download`
+       attribute override). That native-download path is what matters: an
+       earlier version of this routed the real transfer through fetch()
+       and saved it from a blob: URL instead, which seemed equivalent but
+       silently broke the server's "VRC Content Manager/<filename>"
+       Content-Disposition subfolder trick -- Chromium only honors a slash
+       as a subfolder separator for a real navigation-style download, not
+       for a blob: URL's `download` attribute (confirmed the hard way: it
+       showed up as a flat file with the slash turned into an underscore).
+       Letting the browser drive the real download natively, HEAD-warmed
+       first, keeps both properties instead of trading one for the other.
     */
     (function () {
       var DOWNLOAD_HREF_RE = /^\/api\/v1\/items\/\d+(\/files\/\d+)?\/download$/;
-      var DOWNLOAD_SUBFOLDER = "VRC Content Manager";
+      var STATUS_MESSAGES = {
+        404: "商品またはファイルが見つかりません。",
+        502: "ダウンロードに失敗しました。",
+        503: "Google Driveが未接続です。",
+      };
 
       // Capture phase, not bubble: the table view's download links call
       // event.stopPropagation() on click (see items/_results_table.html,
@@ -308,42 +323,16 @@
           indeterminate: true, duration: 0,
         });
 
-        fetch(url)
+        fetch(url, { method: "HEAD" })
           .then(function (resp) {
             if (!resp.ok) {
-              return resp.json().catch(function () { return {}; }).then(function (data) {
-                throw new Error(data.detail || ("HTTP " + resp.status));
-              });
+              throw new Error(STATUS_MESSAGES[resp.status] || ("ダウンロードに失敗しました(HTTP " + resp.status + ")"));
             }
-            var total = parseInt(resp.headers.get("content-length") || "0", 10);
-            if (!resp.body || !total) return resp.blob();
-
-            var reader = resp.body.getReader();
-            var received = 0;
-            var chunks = [];
-            function pump() {
-              return reader.read().then(function (result) {
-                if (result.done) return new Blob(chunks);
-                chunks.push(result.value);
-                received += result.value.length;
-                window.Toast.update(toastId, {
-                  variant: "info", title: "ダウンロード中…", message: filename,
-                  progress: Math.round((received / total) * 100), duration: 0,
-                });
-                return pump();
-              });
-            }
-            return pump();
-          })
-          .then(function (blob) {
-            var objectUrl = URL.createObjectURL(blob);
             var a = document.createElement("a");
-            a.href = objectUrl;
-            a.download = DOWNLOAD_SUBFOLDER + "/" + filename;
+            a.href = url;
             document.body.appendChild(a);
             a.click();
             a.remove();
-            setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 10000);
             window.Toast.update(toastId, {
               variant: "success", title: "ダウンロードしました", message: filename, duration: 4000,
             });
