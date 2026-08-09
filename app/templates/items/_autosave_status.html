@@ -8,7 +8,3 @@
       class="text-xs {% if error %}text-danger dark:text-danger-dark{% else %}text-slate-500 dark:text-slate-400{% endif %}">{{ message }}</span>
 {% if item_name is not none %}<span id="edit-panel-title-text" hx-swap-oob="true">{{ item_name }}</span>{% endif %}
 {% if thumbnail_url %}<img id="thumbnail-preview" src="{{ thumbnail_url }}" alt="サムネイルプレビュー" hx-swap-oob="true" class="w-20 h-20 rounded-xl object-cover border border-white/60 dark:border-white/10 mt-1.5 mb-2">{% endif %}
-{# Clears any still-open duplicate-URL confirmation banner -- every save
-   attempt here (successful or a plain validation failure) means the
-   banner, if showing, is resolved or stale either way. #}
-<div id="duplicate-confirm" hx-swap-oob="true"></div>

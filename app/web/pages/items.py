@@ -119,7 +119,7 @@ async def _create_item_from_upload(db: Session, primary_upload: ValidatedUpload)
     filename -- rather than silently leaving two library entries for what's
     very likely the same product uploaded twice, the caller surfaces this
     back to the client so it can offer a merge (see items/list.html's
-    duplicate-confirm toast and /fragments/items/{id}/merge-into/{id}).
+    duplicate-confirm toast and /fragments/items/{id}/merge-duplicate-into/{id}).
     A filename match isn't unambiguous enough to merge automatically, so the
     new item is still created either way -- this is purely advisory.
     """

@@ -436,11 +436,12 @@ def test_autosave_persists_immediately_with_no_explicit_save_step(client, tmp_pa
     assert detail.name == "Renamed By Autosave"
 
 
-def test_autosave_offers_confirm_dialog_instead_of_saving_a_duplicate_product_url(client, tmp_path: Path) -> None:
-    """The user chose "show a confirmation dialog" over silently
-    auto-merging (see item_service.find_duplicate_product_url_item /
-    merge_item_into) -- entering a BoothURL that another item already has
-    must not save anything until the user picks merge-or-keep-separate."""
+def test_autosave_auto_merges_when_product_url_matches_another_item(client, tmp_path: Path) -> None:
+    """Entering a BoothURL that another item already has merges this item
+    into that one automatically instead of asking (see
+    item_service.find_duplicate_product_url_item / merge_item_into) --
+    matches the periodic auto_merge_duplicate_products sweep's behavior for
+    retroactive duplicates."""
     test_client, db = client
     fake_client = FakeDriveClient()
 
@@ -471,80 +472,17 @@ def test_autosave_offers_confirm_dialog_instead_of_saving_a_duplicate_product_ur
 
     assert response.status_code == 200
     assert "Existing Item" in response.text
-    assert f'hx-post="/fragments/items/{editing.id}/merge-into/{existing.id}"' in response.text
-    assert f'hx-post="/fragments/items/{editing.id}/edit"' in response.text
-    assert "force_duplicate" in response.text
-    # No save happened -- the product_url edit is deferred until resolved.
-    assert item_service.get_item_detail(db, editing.id).product_url is None
-
-
-def test_autosave_force_duplicate_bypasses_the_confirm_dialog(client, tmp_path: Path) -> None:
-    """Resolves the banner above's "別々のまま登録" action: the same save,
-    resubmitted with force_duplicate=true, must go through normally."""
-    test_client, db = client
-    fake_client = FakeDriveClient()
-
-    item_service.create_item_with_file(
-        db,
-        data=ItemCreate(name="Existing Item", shop_name="未設定", product_url="https://booth.pm/ja/items/111"),
-        primary_upload=_make_upload(tmp_path, "existing.zip"),
-        drive_client=fake_client,
-    )
-    editing = item_service.create_item_with_file(
-        db,
-        data=ItemCreate(name="Editing Item", shop_name="未設定"),
-        primary_upload=_make_upload(tmp_path, "editing.zip"),
-        drive_client=fake_client,
-    )
-    token = _csrf_token(test_client.get(f"/fragments/items/{editing.id}/edit").text)
-
-    response = test_client.post(
-        f"/fragments/items/{editing.id}/edit",
-        headers={"X-CSRF-Token": token},
-        data={
-            "csrf_token": token,
-            "name": "Editing Item",
-            "shop_name": "未設定",
-            "product_url": "https://booth.pm/ja/items/111",
-            "force_duplicate": "true",
-        },
-    )
-
-    assert response.status_code == 200
-    assert "保存しました" in response.text
-    assert item_service.get_item_detail(db, editing.id).product_url == "https://booth.pm/ja/items/111"
-
-
-def test_merge_into_route_folds_source_item_into_target_and_returns_its_detail_panel(client, tmp_path: Path) -> None:
-    test_client, db = client
-    fake_client = FakeDriveClient()
-
-    target = item_service.create_item_with_file(
-        db,
-        data=ItemCreate(name="Target Item", shop_name="未設定", product_url="https://booth.pm/ja/items/222"),
-        primary_upload=_make_upload(tmp_path, "target.zip"),
-        drive_client=fake_client,
-    )
-    source = item_service.create_item_with_file(
-        db,
-        data=ItemCreate(name="Source Item", shop_name="未設定"),
-        primary_upload=_make_upload(tmp_path, "source.zip"),
-        drive_client=fake_client,
-    )
-    token = _meta_csrf_token(test_client.get("/items").text)
-
-    response = test_client.post(
-        f"/fragments/items/{source.id}/merge-into/{target.id}", headers={"X-CSRF-Token": token}
-    )
-
-    assert response.status_code == 200
-    assert "Target Item" in response.text
+    # Overrides the form's own hx-target="this"/hx-swap="none" for this one
+    # response -- see submit_edit_item_panel_fragment.
+    assert response.headers.get("hx-retarget") == "#detail-panel"
+    assert response.headers.get("hx-reswap") == "innerHTML"
+    assert response.headers.get("hx-push-url") == f"/items/{existing.id}"
     assert response.headers.get("hx-trigger") == "item-saved"
 
     with pytest.raises(Exception):
-        item_service.get_item_detail(db, source.id)
-    merged = item_service.get_item_detail(db, target.id)
-    assert [f.original_filename for f in merged.attachment_files] == ["source.zip"]
+        item_service.get_item_detail(db, editing.id)
+    merged = item_service.get_item_detail(db, existing.id)
+    assert [f.original_filename for f in merged.attachment_files] == ["editing.zip"]
 
 
 def test_inline_edit_tags_get_returns_prefilled_combobox(client, tmp_path: Path) -> None:

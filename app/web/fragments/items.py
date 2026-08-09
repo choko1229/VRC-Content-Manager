@@ -293,7 +293,6 @@ async def submit_edit_item_panel_fragment(
     is_avatar: bool = Form(False),
     avatar_name: str = Form(""),
     avatar_memo: str = Form(""),
-    force_duplicate: bool = Form(False),
     thumbnail: UploadFile | None = None,
     db: Session = Depends(get_db),
 ):
@@ -320,19 +319,29 @@ async def submit_edit_item_panel_fragment(
         raise HTTPException(status_code=404, detail="商品が見つかりません。")
 
     # A newly-entered (or changed) BoothURL that another item already links
-    # to offers a merge instead of silently letting two items point at the
-    # same product -- see items/_duplicate_confirm.html. force_duplicate is
-    # only ever set by that banner's own "別々のまま登録" button, bypassing
-    # this check for the one save that resolves it.
+    # to is merged automatically instead of leaving two library entries for
+    # one purchase -- same semantics as the periodic
+    # auto_merge_duplicate_products sweep's retroactive merges (see
+    # item_service.merge_item_into). item_id is about to be deleted (its
+    # file(s) fold into the existing item instead), so the rest of this
+    # save is skipped -- whatever other fields were just edited on it don't
+    # matter anymore.
     normalized_url = product_url or None
-    if normalized_url and normalized_url != current.product_url and not force_duplicate:
+    if normalized_url and normalized_url != current.product_url:
         duplicate = item_service.find_duplicate_product_url_item(db, normalized_url, exclude_item_id=item_id)
         if duplicate is not None:
-            return templates.TemplateResponse(
-                request,
-                "items/_duplicate_confirm.html",
-                {"item_id": item_id, "existing_item_id": duplicate.id, "existing_item_name": duplicate.name},
-            )
+            await run_in_threadpool(item_service.merge_item_into, db, item_id, duplicate.id)
+            detail = await run_in_threadpool(item_service.get_item_detail, db, duplicate.id)
+            response = templates.TemplateResponse(request, "items/_detail_panel.html", {"item": detail})
+            # Overrides the form's own hx-target="this"/hx-swap="none" for
+            # this one response -- item_id no longer exists, so the whole
+            # detail panel is swapped to the surviving item instead of the
+            # usual small OOB status update.
+            response.headers["HX-Retarget"] = "#detail-panel"
+            response.headers["HX-Reswap"] = "innerHTML"
+            response.headers["HX-Push-Url"] = f"/items/{duplicate.id}"
+            response.headers["HX-Trigger"] = "item-saved"
+            return response
 
     # 対応アバター checkboxes only ever offer avatars that already exist
     # (avatar_service.list_avatar_options), so resolving by id and passing
@@ -420,31 +429,13 @@ async def submit_edit_item_panel_fragment(
     return response
 
 
-@router.post("/{item_id}/merge-into/{target_item_id}", dependencies=[Depends(verify_csrf)])
-def merge_item_into_fragment(
-    request: Request, item_id: int, target_item_id: int, db: Session = Depends(get_db)
-):
-    """Resolves the items/_duplicate_confirm.html "統合する" action: folds
-    item_id's file(s) onto target_item_id and drops item_id, then swaps the
-    whole detail panel over to the merged (target) item -- unlike the
-    auto-save route above, this one intentionally replaces the edit panel
-    entirely, since the item being edited no longer exists afterward."""
-    try:
-        item_service.merge_item_into(db, item_id, target_item_id)
-        detail = item_service.get_item_detail(db, target_item_id)
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="商品が見つかりません。")
-    response = templates.TemplateResponse(request, "items/_detail_panel.html", {"item": detail})
-    response.headers["HX-Trigger"] = "item-saved"
-    return response
-
-
 @router.post("/{item_id}/merge-duplicate-into/{target_item_id}", dependencies=[Depends(verify_csrf)])
 def merge_duplicate_filename_fragment(item_id: int, target_item_id: int, db: Session = Depends(get_db)):
     """Resolves the upload flow's duplicate-confirm toast (items/list.html:
-    showDuplicateConfirmToast). Unlike merge_item_into above -- used for the
-    BoothURL-duplicate flow, where the two files may genuinely be worth
-    keeping both of -- a filename match means item_id's file is presumed a
+    showDuplicateConfirmToast). Unlike the BoothURL-duplicate merge in
+    submit_edit_item_panel_fragment above -- automatic, since an exact
+    product URL match is unambiguous -- a mere filename match isn't reliable
+    enough to merge without asking, and item_id's file is presumed a
     redundant copy of target_item_id's, so it's deleted outright rather than
     kept as an attachment (see item_service.merge_duplicate_group). Called
     via plain fetch rather than htmx, so a bare JSON body is enough."""
