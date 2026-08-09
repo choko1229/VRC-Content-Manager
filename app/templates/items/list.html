@@ -9,30 +9,41 @@
 <div class="lg:grid lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-6 lg:items-start">
   <div class="min-w-0">
     {% set advanced_active = filters.shop_id or filters.status_code or filters.category or filters.tags or filters.avatars or filters.favorites_only %}
-    {% call ui.glass(extra="mb-6") %}
-    <form id="filter-form" hx-get="/fragments/items" hx-target="#item-results" hx-trigger="change, submit" aria-label="商品検索・絞り込み">
-      <input type="hidden" name="view" id="view-input" value="{{ view }}">
-      <div class="flex flex-col sm:flex-row gap-4 sm:items-end">
-        {{ ui.text_field("q", "キーワード", value=filters.q, placeholder="商品名・メモ", extra="flex-1") }}
-        {{ ui.btn("検索", variant="primary", icon="search", type="submit") }}
-      </div>
 
-      <details class="group mt-4" {% if advanced_active %}open{% endif %}>
-        <summary class="inline-flex items-center gap-1.5 min-h-9 cursor-pointer select-none text-sm font-medium text-accent dark:text-accent-dark rounded-lg px-1 -mx-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
-          <span class="icon text-[1.2rem] transition-transform motion-safe:group-open:rotate-180" aria-hidden="true">expand_more</span>
-          詳細フィルタ{% if advanced_active %}<span class="inline-flex items-center justify-center w-2 h-2 rounded-full bg-accent dark:bg-accent-dark" aria-hidden="true"></span><span class="sr-only">(絞り込み適用中)</span>{% endif %}
-        </summary>
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mt-4">
-          {{ ui.select_field("shop_id", "ショップ", [("", "すべて")] + shop_options, selected=filters.shop_id) }}
-          {{ ui.select_field("status_code", "ステータス", [("", "すべて")] + status_options, selected=filters.status_code) }}
-          {{ ui.select_field("category", "種別", [("", "すべて")] + category_options, selected=filters.category) }}
-          {{ ui.combobox_field("tags", "タグ", tag_names, value=filters.tags, placeholder="カンマ区切り", multi=True) }}
-          {{ ui.combobox_field("avatars", "対応アバター", avatar_names, value=filters.avatars, placeholder="カンマ区切り", multi=True) }}
-          {{ ui.checkbox_field("favorites_only", "お気に入りのみ", checked=filters.favorites_only, extra="self-end") }}
+    {# Sticky: pinned just under the header for the entire page scroll, not
+       just while its own (comparatively short) content is on screen. A
+       sticky element's "stuck" range is bounded by its own PARENT's box
+       (div.min-w-0 here), not by its own content height -- div.min-w-0 also
+       contains #item-results below, which is what actually makes this span
+       the whole list. The search field and button stay real descendants of
+       this <form> (not associated in via the HTML form="" attribute from
+       outside it) so native submission/Enter-to-search stays reliable. #}
+    <form id="filter-form" hx-get="/fragments/items" hx-target="#item-results" hx-trigger="change, submit" aria-label="商品検索・絞り込み"
+          class="sticky top-14 z-30 block pt-4 pb-3 -mt-4 mb-3">
+      <input type="hidden" name="view" id="view-input" value="{{ view }}">
+
+      <div class="rounded-3xl border border-white/70 dark:border-white/10 bg-white/85 dark:bg-slate-900/80 backdrop-blur-2xl shadow-xl shadow-slate-200/50 dark:shadow-black/30 ring-1 ring-inset ring-white/50 dark:ring-white/10 p-5 sm:p-6">
+        <div class="flex flex-col sm:flex-row gap-4 sm:items-end">
+          {{ ui.text_field("q", "キーワード", value=filters.q, placeholder="商品名・メモ", extra="flex-1") }}
+          {{ ui.btn("検索", variant="primary", icon="search", type="submit") }}
         </div>
-      </details>
+
+        <details class="group mt-4" {% if advanced_active %}open{% endif %}>
+          <summary class="inline-flex items-center gap-1.5 min-h-9 cursor-pointer select-none text-sm font-medium text-accent dark:text-accent-dark rounded-lg px-1 -mx-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+            <span class="icon text-[1.2rem] transition-transform motion-safe:group-open:rotate-180" aria-hidden="true">expand_more</span>
+            詳細フィルタ{% if advanced_active %}<span class="inline-flex items-center justify-center w-2 h-2 rounded-full bg-accent dark:bg-accent-dark" aria-hidden="true"></span><span class="sr-only">(絞り込み適用中)</span>{% endif %}
+          </summary>
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mt-4">
+            {{ ui.select_field("shop_id", "ショップ", [("", "すべて")] + shop_options, selected=filters.shop_id) }}
+            {{ ui.select_field("status_code", "ステータス", [("", "すべて")] + status_options, selected=filters.status_code) }}
+            {{ ui.select_field("category", "種別", [("", "すべて")] + category_options, selected=filters.category) }}
+            {{ ui.combobox_field("tags", "タグ", tag_names, value=filters.tags, placeholder="カンマ区切り", multi=True) }}
+            {{ ui.combobox_field("avatars", "対応アバター", avatar_names, value=filters.avatars, placeholder="カンマ区切り", multi=True) }}
+            {{ ui.checkbox_field("favorites_only", "お気に入りのみ", checked=filters.favorites_only, extra="self-end") }}
+          </div>
+        </details>
+      </div>
     </form>
-    {% endcall %}
 
     <div class="flex items-center justify-between gap-3 mb-4 flex-wrap">
       <div class="flex items-center gap-3">

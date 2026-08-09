@@ -76,3 +76,46 @@ html {
 #item-results table .js-item {
   contain-intrinsic-size: 0 44px;
 }
+
+/* Custom scrollbar for every scrollable area (page body, the sidebar nav,
+   the sticky detail panel, dropdown/combobox lists, etc.) -- thin and
+   tinted with the accent color instead of the OS-default bar, to match the
+   glass UI. scrollbar-width/-color covers Firefox; the ::-webkit-scrollbar
+   rules cover Chrome/Edge/Safari (no equivalent shorthand exists there). */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 98, 204, 0.35) transparent;
+}
+
+:root.dark html,
+html.dark {
+  scrollbar-color: rgba(64, 156, 255, 0.4) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 98, 204, 0.35);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 98, 204, 0.6);
+}
+
+html.dark *::-webkit-scrollbar-thumb {
+  background-color: rgba(64, 156, 255, 0.4);
+}
+
+html.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(64, 156, 255, 0.65);
+}
