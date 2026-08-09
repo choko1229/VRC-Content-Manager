@@ -64,6 +64,23 @@
 {% endif %}
 
 {% call ui.glass(extra="mb-6") %}
+<h2 class="text-lg font-medium mb-3">重複するBoothURLの統合</h2>
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-4">
+  同じBoothURLに紐付いた商品を確認なしで自動的に統合します(最も古い商品にファイルをまとめます)。
+  商品の編集でBoothURLを紐付けた際にはその場で自動統合されますが、それより前から重複していたもの(Drive上での取り込みなど)はここでまとめて統合できます。
+  このチェックはバックグラウンドで10分おきに自動実行されるため、通常はボタンを押す必要はありません(すぐに反映したい場合のみ使用してください)。
+</p>
+<div id="merge-duplicate-products-result" aria-live="polite"></div>
+<div class="flex flex-wrap items-center gap-3">
+  {{ ui.btn("今すぐ統合", variant="secondary", icon="merge_type", type="button",
+      attrs='hx-post="/fragments/settings/merge-duplicate-products" hx-target="#merge-duplicate-products-result" hx-swap="innerHTML" hx-indicator="#merge-duplicate-products-indicator" hx-disabled-elt="this"') }}
+  <span id="merge-duplicate-products-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
+    <span class="icon text-[1rem] animate-spin" aria-hidden="true">progress_activity</span>統合中…
+  </span>
+</div>
+{% endcall %}
+
+{% call ui.glass(extra="mb-6") %}
 <h2 class="text-lg font-medium mb-3">重複ファイルの検出</h2>
 <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">
   同じファイル名で複数回登録されてしまった商品を検出します。アップロード時にはその場で統合確認が出ますが、

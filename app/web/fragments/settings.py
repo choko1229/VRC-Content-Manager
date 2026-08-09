@@ -108,6 +108,16 @@ async def sync_booth_library(request: Request, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/merge-duplicate-products")
+async def merge_duplicate_products_now(request: Request, db: Session = Depends(get_db)):
+    # Manual trigger for item_service.auto_merge_duplicate_products, which
+    # otherwise only runs on its own 10-minute background sweep (merge_loop)
+    # -- for confirming the result right away instead of waiting.
+    merged = await run_in_threadpool(item_service.auto_merge_duplicate_products, db)
+    message = f"{merged}件を統合しました。" if merged else "重複するBoothURLの商品はありませんでした。"
+    return templates.TemplateResponse(request, "partials/merge_duplicate_products.html", {"message": message})
+
+
 @router.post("/duplicate-files/scan")
 async def scan_duplicate_files(request: Request, db: Session = Depends(get_db)):
     groups = await run_in_threadpool(item_service.find_duplicate_filename_groups, db)

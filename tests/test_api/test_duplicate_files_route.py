@@ -96,6 +96,50 @@ def test_duplicate_files_scan_and_merge_flow(client, tmp_path: Path) -> None:
         item_service.get_item_detail(db, ids[1])
 
 
+def test_merge_duplicate_products_reports_no_duplicates(client, tmp_path: Path) -> None:
+    test_client, db = client
+    item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="A", shop_name="Shop", product_url="https://booth.example/items/1"),
+        primary_upload=_make_upload(tmp_path, "a.zip", unique_suffix="A"),
+    )
+    page = test_client.get("/settings")
+    csrf_token = _extract_csrf(page.text)
+
+    response = test_client.post(
+        "/fragments/settings/merge-duplicate-products", headers={"X-CSRF-Token": csrf_token}
+    )
+
+    assert response.status_code == 200
+    assert "重複するBoothURLの商品はありませんでした" in response.text
+
+
+def test_merge_duplicate_products_merges_items_sharing_a_product_url(client, tmp_path: Path) -> None:
+    test_client, db = client
+    keep = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Keep This", shop_name="Shop", product_url="https://booth.example/items/2"),
+        primary_upload=_make_upload(tmp_path, "keep.zip", unique_suffix="Keep"),
+    )
+    fold = item_service.create_item_with_file(
+        db,
+        data=ItemCreate(name="Fold Me", shop_name="Shop", product_url="https://booth.example/items/2"),
+        primary_upload=_make_upload(tmp_path, "fold.zip", unique_suffix="Fold"),
+    )
+    page = test_client.get("/settings")
+    csrf_token = _extract_csrf(page.text)
+
+    response = test_client.post(
+        "/fragments/settings/merge-duplicate-products", headers={"X-CSRF-Token": csrf_token}
+    )
+
+    assert response.status_code == 200
+    assert "1件を統合しました" in response.text
+    assert item_service.get_item_detail(db, keep.id).id == keep.id
+    with pytest.raises(NotFoundError):
+        item_service.get_item_detail(db, fold.id)
+
+
 def test_missing_files_scan_reports_none_when_every_item_has_a_file(client, tmp_path: Path) -> None:
     test_client, db = client
     _create_item(db, tmp_path, item_name="A", filename="a.zip")
