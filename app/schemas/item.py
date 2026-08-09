@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Literal
+from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.item import ItemCategory
 from app.models.license import TriState
@@ -12,6 +13,21 @@ from app.models.license import TriState
 # synced: pushed to Drive, no local download-cache copy right now (green)
 # cached: pushed to Drive and currently has a fresh local download-cache copy (blue)
 FileStatus = Literal["pending", "synced", "cached"]
+
+
+def strip_url_query(value: str | None) -> str | None:
+    """Drops the query string (and fragment) from a BOOTH product URL --
+    links copied from search results or shared elsewhere often carry
+    tracking params (?utm_source=..., ?utm_medium=..., etc.) that are noise
+    on the canonical product page and would otherwise make the same product
+    look like a different URL to duplicate-detection and the BOOTH library
+    exact-filename match."""
+    if not value:
+        return value
+    parts = urlsplit(value)
+    if not parts.scheme:
+        return value
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
 class ItemCreate(BaseModel):
@@ -37,6 +53,11 @@ class ItemCreate(BaseModel):
     redistribution_allowed: TriState = TriState.UNKNOWN
     credit_required: TriState = TriState.UNKNOWN
     license_note: str | None = None
+
+    @field_validator("product_url")
+    @classmethod
+    def _normalize_product_url(cls, v: str | None) -> str | None:
+        return strip_url_query(v)
 
 
 class ItemRead(BaseModel):
@@ -77,6 +98,11 @@ class ItemUpdate(BaseModel):
     redistribution_allowed: TriState = TriState.UNKNOWN
     credit_required: TriState = TriState.UNKNOWN
     license_note: str | None = None
+
+    @field_validator("product_url")
+    @classmethod
+    def _normalize_product_url(cls, v: str | None) -> str | None:
+        return strip_url_query(v)
 
 
 class ItemSearchFilters(BaseModel):
