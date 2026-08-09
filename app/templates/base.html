@@ -272,6 +272,92 @@
   </script>
 
   <script>
+    /* Download links (item list cards/table, detail panel) are plain
+       <a href> tags -- a native, browser-driven download normally gives no
+       feedback at all inside the page itself, and on a server error (no
+       Content-Disposition on that response) the browser would just
+       navigate the whole page away to show raw JSON. Intercepting the
+       click and fetching the same URL instead gives: a progress toast for
+       the whole (possibly long, if a Drive rate limit is being retried --
+       see GoogleDriveClient.download_file) wait, graceful error handling,
+       and a definite "done" signal -- then triggers the actual save via a
+       blob URL, keeping the same "VRC Content Manager/<filename>" path
+       (see app/api/routers/downloads.py) so it still lands in the same
+       Downloads subfolder. Delegated on `document` so it keeps working
+       after htmx swaps the list/detail panel back in.
+    */
+    (function () {
+      var DOWNLOAD_HREF_RE = /^\/api\/v1\/items\/\d+(\/files\/\d+)?\/download$/;
+      var DOWNLOAD_SUBFOLDER = "VRC Content Manager";
+
+      // Capture phase, not bubble: the table view's download links call
+      // event.stopPropagation() on click (see items/_results_table.html,
+      // to keep the row-select handler from also firing) -- a bubble-phase
+      // listener here would never see those clicks at all. Capture runs
+      // top-down before that stopPropagation() call exists to block anything.
+      document.addEventListener("click", function (e) {
+        var link = e.target.closest("a");
+        if (!link || !DOWNLOAD_HREF_RE.test(link.getAttribute("href") || "")) return;
+        e.preventDefault();
+
+        var url = link.getAttribute("href");
+        var filename = link.getAttribute("title") || "download";
+        var toastId = "download-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+        window.Toast.show({
+          id: toastId, variant: "info", title: "ダウンロード中…", message: filename,
+          indeterminate: true, duration: 0,
+        });
+
+        fetch(url)
+          .then(function (resp) {
+            if (!resp.ok) {
+              return resp.json().catch(function () { return {}; }).then(function (data) {
+                throw new Error(data.detail || ("HTTP " + resp.status));
+              });
+            }
+            var total = parseInt(resp.headers.get("content-length") || "0", 10);
+            if (!resp.body || !total) return resp.blob();
+
+            var reader = resp.body.getReader();
+            var received = 0;
+            var chunks = [];
+            function pump() {
+              return reader.read().then(function (result) {
+                if (result.done) return new Blob(chunks);
+                chunks.push(result.value);
+                received += result.value.length;
+                window.Toast.update(toastId, {
+                  variant: "info", title: "ダウンロード中…", message: filename,
+                  progress: Math.round((received / total) * 100), duration: 0,
+                });
+                return pump();
+              });
+            }
+            return pump();
+          })
+          .then(function (blob) {
+            var objectUrl = URL.createObjectURL(blob);
+            var a = document.createElement("a");
+            a.href = objectUrl;
+            a.download = DOWNLOAD_SUBFOLDER + "/" + filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 10000);
+            window.Toast.update(toastId, {
+              variant: "success", title: "ダウンロードしました", message: filename, duration: 4000,
+            });
+          })
+          .catch(function (err) {
+            window.Toast.update(toastId, {
+              variant: "error", title: "ダウンロードに失敗しました", message: err.message || String(err), duration: 8000,
+            });
+          });
+      }, true);
+    })();
+  </script>
+
+  <script>
     /* Custom-styled autocomplete replacing native <datalist> (see
        _macros.html: combobox_field). Delegated on `document` (not bound
        per-element) so it works for combobox instances swapped in later by

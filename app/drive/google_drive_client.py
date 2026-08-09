@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,15 @@ from app.drive.types import DriveFile
 logger = logging.getLogger(__name__)
 
 _METADATA_FIELDS = "id, name, mimeType, parents, modifiedTime, size"
+
+# Passed to MediaIoBaseDownload.next_chunk() below: googleapiclient's own
+# retry loop backs off (randomized, roughly doubling each attempt) and
+# retries a chunk on 5xx errors, 429, and 403 responses whose reason is
+# userRateLimitExceeded/rateLimitExceeded -- i.e. exactly a Drive API rate
+# limit, which is what a chunk failing partway through a download usually
+# turns out to be. 8 retries gives a cumulative wait of several minutes in
+# the worst case, which is preferable to failing the download outright.
+_DOWNLOAD_NUM_RETRIES = 8
 
 
 def _parse_drive_time(value: str | None) -> datetime | None:
@@ -154,17 +164,30 @@ class GoogleDriveClient:
             raise DriveError(f"failed to update Drive file {file_id}") from exc
 
     def download_file(self, *, file_id: str, dest_path: Path) -> None:
+        """Downloads to a sibling temp file first, only replacing dest_path
+        on full success. Callers cache purely by dest_path existing (see
+        local_cache_service.is_download_cached) -- writing directly to it
+        chunk-by-chunk meant a chunk failing partway through (a rate limit
+        that outlasted its own retries, a dropped connection) left a
+        truncated/empty file sitting exactly where it'd be served from on
+        every subsequent request, indefinitely, since nothing ever checked
+        that the "cached" copy was actually complete.
+        """
         service = self._get_service()
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = dest_path.with_name(f"{dest_path.name}.{uuid.uuid4().hex}.part")
         try:
             request = service.files().get_media(fileId=file_id)
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(dest_path, "wb") as fh:
+            with open(tmp_path, "wb") as fh:
                 downloader = MediaIoBaseDownload(fh, request)
                 done = False
                 while not done:
-                    _status, done = downloader.next_chunk()
+                    _status, done = downloader.next_chunk(num_retries=_DOWNLOAD_NUM_RETRIES)
+            tmp_path.replace(dest_path)
         except HttpError as exc:
             raise DriveError(f"failed to download Drive file {file_id}") from exc
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     def get_metadata(self, file_id: str) -> DriveFile:
         service = self._get_service()
