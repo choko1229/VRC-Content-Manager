@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.db.session import db_write_lock, get_sessionmaker
 from app.drive import folder_layout
 from app.drive.fake_drive_client import _FOLDER_MIME_TYPE, FakeDriveClient
@@ -17,6 +17,7 @@ from app.models.license import TriState
 from app.schemas.item import ItemCreate, ItemSearchFilters, ItemUpdate
 from app.services import (
     avatar_service,
+    booth_info_service,
     drive_sync_service,
     file_content_service,
     item_service,
@@ -542,6 +543,114 @@ def test_add_update_check_records_history_entry(app_db_session: Session, tmp_pat
 def test_add_update_check_raises_not_found_for_missing_item(app_db_session: Session) -> None:
     with pytest.raises(NotFoundError):
         item_service.add_update_check(app_db_session, 999, "note")
+
+
+def test_refresh_from_booth_updates_name_shop_and_description(
+    app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(
+            name="Old Name", shop_name="Old Shop", product_url="https://booth.example/items/1"
+        ),
+        primary_upload=_make_upload(tmp_path),
+        drive_client=FakeDriveClient(),
+    )
+    info = booth_info_service.BoothProductInfo(
+        name="New Name", shop_name="New Shop", shop_url="https://new-shop.booth.pm", price=1000,
+        image_url="https://example.com/thumb.png", description="新しい説明文",
+    )
+    monkeypatch.setattr(booth_info_service, "try_fetch_product_info", lambda url, **kw: info)
+
+    detail = item_service.refresh_from_booth(app_db_session, created.id)
+
+    assert detail.name == "New Name"
+    assert detail.shop_name == "New Shop"
+    assert detail.description == "新しい説明文"
+    notes = {h.note for h in detail.update_history}
+    assert "BOOTHの最新情報に更新しました" in notes
+
+
+def test_refresh_from_booth_fetches_thumbnail_when_none_exists(
+    app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(name="No Thumb", shop_name="Shop", product_url="https://booth.example/items/2"),
+        primary_upload=_make_upload(tmp_path),
+        drive_client=FakeDriveClient(),
+    )
+    info = booth_info_service.BoothProductInfo(
+        name="No Thumb", shop_name="Shop", shop_url=None, price=None,
+        image_url="https://example.com/thumb.png", description=None,
+    )
+    monkeypatch.setattr(booth_info_service, "try_fetch_product_info", lambda url, **kw: info)
+    fetched = thumbnail_service.FetchedThumbnail(content=b"\x89PNG\r\n", content_type="image/png")
+    monkeypatch.setattr(thumbnail_service, "try_fetch_thumbnail", lambda url, **kw: fetched)
+
+    detail = item_service.refresh_from_booth(app_db_session, created.id, drive_client=FakeDriveClient())
+
+    assert detail.has_thumbnail is True
+
+
+def test_refresh_from_booth_does_not_overwrite_existing_thumbnail(
+    app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    thumb = _make_upload(tmp_path, name="keep.png", content=b"\x89PNG\r\n", extension=".png")
+    created = item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(name="Has Thumb", shop_name="Shop", product_url="https://booth.example/items/3"),
+        primary_upload=_make_upload(tmp_path),
+        thumbnail_upload=thumb,
+        drive_client=FakeDriveClient(),
+    )
+    info = booth_info_service.BoothProductInfo(
+        name="Has Thumb", shop_name="Shop", shop_url=None, price=None,
+        image_url="https://example.com/thumb.png", description=None,
+    )
+    monkeypatch.setattr(booth_info_service, "try_fetch_product_info", lambda url, **kw: info)
+
+    def _boom(url, **kw):
+        raise AssertionError("should not fetch a thumbnail when the item already has one")
+
+    monkeypatch.setattr(thumbnail_service, "try_fetch_thumbnail", _boom)
+
+    item_service.refresh_from_booth(app_db_session, created.id)
+
+    item = app_db_session.get(Item, created.id)
+    assert item.thumbnail_file.original_filename == "keep.png"
+
+
+def test_refresh_from_booth_raises_when_no_product_url(app_db_session: Session, tmp_path: Path) -> None:
+    created = _create_item(app_db_session, tmp_path, name="Unlinked")
+
+    with pytest.raises(ValidationError):
+        item_service.refresh_from_booth(app_db_session, created.id)
+
+
+def test_refresh_from_booth_raises_and_records_history_when_fetch_fails(
+    app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(name="Linked", shop_name="Shop", product_url="https://booth.example/items/4"),
+        primary_upload=_make_upload(tmp_path),
+        drive_client=FakeDriveClient(),
+    )
+    monkeypatch.setattr(booth_info_service, "try_fetch_product_info", lambda url, **kw: None)
+
+    with pytest.raises(ValidationError):
+        item_service.refresh_from_booth(app_db_session, created.id)
+
+    detail = item_service.get_item_detail(app_db_session, created.id)
+    assert detail.name == "Linked"  # unchanged
+    notes = {h.note for h in detail.update_history}
+    assert "BOOTHから情報を取得できませんでした。" in notes
+
+
+def test_refresh_from_booth_raises_not_found_for_missing_item(app_db_session: Session) -> None:
+    with pytest.raises(NotFoundError):
+        item_service.refresh_from_booth(app_db_session, 999)
 
 
 def test_delete_item_removes_row_and_drive_files(app_db_session: Session, tmp_path: Path) -> None:

@@ -13,6 +13,7 @@ from starlette.concurrency import run_in_threadpool
 from app.config import get_settings
 from app.core.csrf import verify_csrf
 from app.core.exceptions import NotFoundError
+from app.core.exceptions import ValidationError as AppValidationError
 from app.core.validation import UploadValidationError
 from app.db.session import get_db
 from app.models.item import ItemCategory
@@ -195,6 +196,32 @@ def add_update_check_fragment(
 
     detail = item_service.get_item_detail(db, item_id)
     return templates.TemplateResponse(request, "partials/update_history.html", {"history": detail.update_history})
+
+
+@router.post("/{item_id}/refresh-from-booth", dependencies=[Depends(verify_csrf)])
+async def refresh_item_from_booth_fragment(request: Request, item_id: int, db: Session = Depends(get_db)):
+    """Manually re-fetches the linked BOOTH page and applies its current
+    name/shop/description (and thumbnail, if the item has none yet) to the
+    item -- see item_service.refresh_from_booth. OOB-updates the open edit
+    panel's fields in place, same pattern as fetch-info, rather than
+    swapping the whole panel."""
+    try:
+        detail = await run_in_threadpool(item_service.refresh_from_booth, db, item_id)
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="商品が見つかりません。")
+    except AppValidationError as exc:
+        return templates.TemplateResponse(
+            request, "items/_refresh_from_booth_result.html", {"error": str(exc)}
+        )
+
+    thumbnail_url = f"/items/{item_id}/thumbnail?v={uuid4().hex}" if detail.has_thumbnail else None
+    response = templates.TemplateResponse(
+        request,
+        "items/_refresh_from_booth_result.html",
+        {"error": None, "item": detail, "thumbnail_url": thumbnail_url},
+    )
+    response.headers["HX-Trigger"] = "item-saved"
+    return response
 
 
 def _edit_panel_context(

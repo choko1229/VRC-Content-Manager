@@ -48,6 +48,23 @@
        wiping out every other field the moment this request resolves. #}
     <div id="booth-library-match" hx-get="/fragments/items/{{ item_id }}/booth-library-match"
          hx-trigger="load" hx-target="this" hx-swap="innerHTML"></div>
+    {% if form_values.get('product_url') %}
+    {# Re-fetches the already-linked product page and overwrites name/shop/
+       description with whatever BOOTH shows right now (thumbnail only if
+       the item has none yet -- see item_service.refresh_from_booth), for
+       when a listing gets renamed or edited after this item was added.
+       hx-target is set explicitly (not "this") for the same
+       hx-target-inheritance reason as booth-library-match above. #}
+    <button type="button" hx-post="/fragments/items/{{ item_id }}/refresh-from-booth"
+            hx-target="#refresh-from-booth-result" hx-swap="innerHTML" hx-indicator="#refresh-from-booth-indicator"
+            class="inline-flex items-center gap-1.5 min-h-8 px-3 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+      <span class="icon text-[0.95rem]" aria-hidden="true">sync</span>BOOTHの最新情報に更新
+    </button>
+    <p id="refresh-from-booth-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
+      <span class="icon text-[1rem]" aria-hidden="true">progress_activity</span>更新中…
+    </p>
+    <div id="refresh-from-booth-result" aria-live="polite"></div>
+    {% endif %}
     {# Searches BOOTH using the *current* value of the title field below
        (hx-vals reads it live at click time, not a value baked into this
        button at panel-render time) -- otherwise editing the filename-derived

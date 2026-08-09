@@ -1,0 +1,11 @@
+{% import "_macros.html" as ui %}
+{% if error %}
+{{ ui.alert(error, variant="error") }}
+{% else %}
+{{ ui.alert("BOOTHの最新情報に更新しました。", variant="success") }}
+{% if item.name %}{{ ui.oob_field_value("f-name", "name", item.name, required=True) }}{% endif %}
+{% if item.shop_name %}{{ ui.oob_field_value("f-shop_name", "shop_name", item.shop_name, required=True) }}{% endif %}
+{% if item.description %}{{ ui.oob_textarea_value("f-description", "description", item.description) }}{% endif %}
+{% if thumbnail_url %}<img id="thumbnail-preview" src="{{ thumbnail_url }}" alt="サムネイルプレビュー" hx-swap-oob="true" class="w-20 h-20 rounded-xl object-cover border border-white/60 dark:border-white/10 mt-1.5 mb-2">{% endif %}
+<span id="edit-panel-title-text" hx-swap-oob="true">{{ item.name }}</span>
+{% endif %}

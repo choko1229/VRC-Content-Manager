@@ -25,7 +25,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.db.session import db_write_lock, get_sessionmaker
 from app.drive.client import DriveClient
 from app.models.avatar import Avatar
@@ -47,6 +47,7 @@ from app.schemas.item import (
 )
 from app.services import (
     avatar_service,
+    booth_info_service,
     drive_sync_service,
     local_cache_service,
     oauth_service,
@@ -609,6 +610,69 @@ def add_update_check(db: Session, item_id: int, note: str | None) -> None:
         db.commit()
     drive_sync_service.mark_dirty()
     logger.info("update check recorded for item id=%s", item.id)
+
+
+def refresh_from_booth(db: Session, item_id: int, *, drive_client: DriveClient | None = None) -> ItemDetail:
+    """Re-fetches the linked BOOTH product page and applies its current
+    name/shop/description to the item -- for when a listing gets renamed or
+    edited after the item was first added, so the two don't quietly drift
+    apart. The thumbnail is only touched if the item doesn't already have
+    one, same rule as the auto-fetch on initial link (see update_item) -- a
+    manually chosen or previously auto-fetched thumbnail is never silently
+    replaced by this. Always records an update_history entry, success or
+    failure, as a visible trace that a refresh was attempted.
+
+    Raises ValidationError if there's no linked product_url, or if the
+    fetch itself fails (network error, page structure changed, robots.txt
+    disallows it, ...) -- both are caller-facing, user-readable messages.
+    """
+    item = db.get(Item, item_id)
+    if item is None:
+        raise NotFoundError("Item", item_id)
+    if not item.product_url:
+        raise ValidationError("この商品にはBoothURLが設定されていません。")
+    product_url = item.product_url
+
+    # Network calls -- deliberately outside db_write_lock, see
+    # app/services/drive_sync_service.py's module docstring for why holding
+    # it across one would stall every other save in the app.
+    info = booth_info_service.try_fetch_product_info(product_url)
+    if info is None:
+        add_update_check(db, item_id, "BOOTHから情報を取得できませんでした。")
+        raise ValidationError("BOOTHから情報を取得できませんでした。時間をおいて再度お試しください。")
+
+    resolved_thumbnail: _ResolvedThumbnail | None = None
+    if item.thumbnail_file is None:
+        fetched = thumbnail_service.try_fetch_thumbnail(product_url)
+        if fetched is not None:
+            resolved_thumbnail = _ResolvedThumbnail(upload=_write_fetched_thumbnail(fetched), owned=True)
+
+    with db_write_lock:
+        item = db.get(Item, item_id, populate_existing=True)
+        if item is None:
+            raise NotFoundError("Item", item_id)
+
+        if info.name:
+            item.name = info.name
+        if info.shop_name:
+            item.shop = shop_service.get_or_create_shop(db, name=info.shop_name, url=info.shop_url)
+        if info.description:
+            item.description = info.description
+        db.add(UpdateHistory(item_id=item.id, note="BOOTHの最新情報に更新しました"))
+        db.commit()
+        db.refresh(item)
+
+        if resolved_thumbnail is not None and item.thumbnail_file is None:
+            _apply_thumbnail(db, item, resolved_thumbnail, drive_client)
+            db.refresh(item)
+        elif resolved_thumbnail is not None:
+            # Lost the race: something else gave this item a thumbnail while
+            # the fetch above was in flight (unlocked) -- keep that one.
+            resolved_thumbnail.upload.path.unlink(missing_ok=True)
+
+    drive_sync_service.mark_dirty()
+    logger.info("refreshed item id=%s from BOOTH", item.id)
+    return get_item_detail(db, item.id)
 
 
 def _write_fetched_thumbnail(fetched: thumbnail_service.FetchedThumbnail) -> ValidatedUpload:
