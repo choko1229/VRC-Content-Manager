@@ -25,6 +25,14 @@ from app.services import file_content_service, oauth_service
 router = APIRouter(prefix="/api/v1")
 logger = logging.getLogger(__name__)
 
+# A forward slash in a FileResponse's filename isn't just cosmetic: Chromium
+# browsers (Chrome/Edge) create the corresponding subfolder under the
+# user's default Downloads directory rather than sanitizing it away, so this
+# alone routes every download to Downloads/VRC Content Manager/<file>. This
+# is Chromium-specific behavior, not a spec guarantee -- Firefox/Safari are
+# expected to just flatten the slash into the filename instead.
+_DOWNLOAD_SUBFOLDER = "VRC Content Manager"
+
 
 def _serve_file(db: Session, item_id: int, file: ItemFile):
     drive_client = None
@@ -43,7 +51,7 @@ def _serve_file(db: Session, item_id: int, file: ItemFile):
     logger.info("item id=%s downloaded (item_file id=%s)", item_id, file.id)
     return FileResponse(
         path=path,
-        filename=file.original_filename,
+        filename=f"{_DOWNLOAD_SUBFOLDER}/{file.original_filename}",
         media_type=file.content_type or "application/octet-stream",
     )
 

@@ -57,6 +57,26 @@ def test_download_item_file_success(client_with_item) -> None:
     assert "model.vrm" in response.headers["content-disposition"]
 
 
+def test_download_item_file_nests_filename_under_app_subfolder(client_with_item) -> None:
+    # A "/" in a FileResponse filename isn't cosmetic -- Chromium browsers
+    # create the corresponding subfolder under the default Downloads
+    # directory rather than sanitizing it away, so this is what actually
+    # routes downloads into Downloads/VRC Content Manager/ -- see
+    # app/api/routers/downloads.py's _DOWNLOAD_SUBFOLDER.
+    client, item_id = client_with_item
+
+    response = client.get(f"/api/v1/items/{item_id}/download")
+
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert "VRC" in disposition and "Content" in disposition and "Manager" in disposition
+    assert "model.vrm" in disposition
+    # The literal "/" between the subfolder and filename must survive
+    # whichever Content-Disposition form (plain filename= vs percent-encoded
+    # filename*=utf-8'') gets used -- it's what Chromium keys off of.
+    assert "%2F" not in disposition.upper()
+
+
 def test_download_item_file_populates_and_reuses_download_cache(client_with_item) -> None:
     client, item_id = client_with_item
 
