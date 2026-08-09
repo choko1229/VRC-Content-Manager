@@ -169,32 +169,37 @@ def test_reconcile_import_of_one_file_surviving_another_files_failure(
     app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # One file blowing up in an unexpected way (not just a Drive move
-    # failure, which _move_and_attach already tolerates) must not discard
-    # every other file already successfully imported in the same sweep.
+    # failure, which _move_file already tolerates) must not discard every
+    # other file already successfully imported in the same sweep.
     fake_client = FakeDriveClient()
     upload_id = folder_layout.ensure_upload_folder(fake_client)
+    file_id = folder_layout.ensure_file_folder(fake_client)
     for name in ("good.zip", "poison.zip"):
         path = tmp_path / name
         path.write_bytes(b"zip bytes")
         fake_client.upload_file(local_path=path, name=name, parent_id=upload_id, mime_type="application/zip")
 
-    real_move_and_attach = drive_reconcile_service._move_and_attach
+    real_build_item_file = drive_reconcile_service._build_item_file
 
-    def _flaky_move_and_attach(db, drive_client, item_id, role, drive_file, old_parent_id, new_parent_id):
+    def _flaky_build_item_file(item_id, role, drive_file, folder_id):
         if drive_file.name == "poison.zip":
             raise RuntimeError("boom")
-        return real_move_and_attach(db, drive_client, item_id, role, drive_file, old_parent_id, new_parent_id)
+        return real_build_item_file(item_id, role, drive_file, folder_id)
 
-    monkeypatch.setattr(drive_reconcile_service, "_move_and_attach", _flaky_move_and_attach)
+    monkeypatch.setattr(drive_reconcile_service, "_build_item_file", _flaky_build_item_file)
 
     result = drive_reconcile_service.reconcile(app_db_session, fake_client)
 
     assert result.imported_items == 1
     items = app_db_session.execute(select(Item)).scalars().all()
     assert [i.name for i in items] == ["good"]
-    # the poisoned file is untouched on Drive and will be retried next run
-    remaining = {f.name for f in fake_client.list_folder(upload_id)}
-    assert "poison.zip" in remaining
+    # The Drive move for poison.zip already succeeded before its DB write
+    # failed (moves now happen before the transaction, not inside it -- see
+    # _move_file), so it ends up sitting in file/ with no DB record, same as
+    # any other Drive-succeeded-DB-failed orphan -- self-heals on a later
+    # sweep instead of being silently lost. See the module docstring.
+    assert "poison.zip" not in {f.name for f in fake_client.list_folder(upload_id)}
+    assert "poison.zip" in {f.name for f in fake_client.list_folder(file_id)}
 
 
 def test_reconcile_pairs_sibling_image_as_thumbnail(app_db_session: Session, tmp_path: Path) -> None:

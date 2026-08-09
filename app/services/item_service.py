@@ -213,19 +213,6 @@ def get_item_detail(db: Session, item_id: int) -> ItemDetail:
     return _to_detail(item)
 
 
-def _resolve_edit_thumbnail(item: Item, data: ItemUpdate, thumbnail_upload: ValidatedUpload | None) -> _ResolvedThumbnail | None:
-    if thumbnail_upload is not None:
-        return _ResolvedThumbnail(upload=thumbnail_upload, owned=False)
-    if item.thumbnail_file is not None or not data.product_url:
-        return None
-
-    fetched = thumbnail_service.try_fetch_thumbnail(data.product_url)
-    if fetched is None:
-        return None
-
-    return _ResolvedThumbnail(upload=_write_fetched_thumbnail(fetched), owned=True)
-
-
 def _delete_file_content(db: Session, item_file: ItemFile, drive_client: DriveClient | None) -> None:
     """Best-effort removal of an ItemFile's underlying blob -- the Drive file
     if it's been synced, otherwise its local pending-upload cache copy.
@@ -290,13 +277,38 @@ def update_item(
     thumbnail_upload: ValidatedUpload | None = None,
     drive_client: DriveClient | None = None,
 ) -> ItemRead:
+    item = db.get(Item, item_id)
+    if item is None:
+        raise NotFoundError("Item", item_id)
+
+    # Resolve an auto-fetched thumbnail (thumbnail_service.try_fetch_thumbnail
+    # -- a BOOTH network call, robots.txt check included) *before* taking
+    # db_write_lock below, same reasoning as create_item_with_file's
+    # _resolve_thumbnail: every autosave on every item edit takes that same
+    # lock, so a network round-trip held under it would stall every other
+    # save in the app for however long BOOTH takes to respond. A caller-
+    # supplied thumbnail_upload is already local and doesn't need this.
+    if thumbnail_upload is not None:
+        resolved_thumbnail: _ResolvedThumbnail | None = _ResolvedThumbnail(upload=thumbnail_upload, owned=False)
+    elif item.thumbnail_file is None and data.product_url:
+        fetched = thumbnail_service.try_fetch_thumbnail(data.product_url)
+        resolved_thumbnail = (
+            _ResolvedThumbnail(upload=_write_fetched_thumbnail(fetched), owned=True) if fetched is not None else None
+        )
+    else:
+        resolved_thumbnail = None
+
     # Held for the whole edit (not just around the commit): a request-path
     # write runs on its own threadpool thread just like the background
     # DB-writing flows, and can otherwise overlap with them (or with another
     # concurrent request) closely enough to lose SQLite's busy_timeout race
     # -- see db_write_lock's docstring.
     with db_write_lock:
-        item = db.get(Item, item_id)
+        # populate_existing: force a fresh read instead of the stale copy
+        # already in this session's identity map from the unlocked read
+        # above -- the item could have been deleted (or, harmlessly,
+        # further edited) while the thumbnail fetch was in flight.
+        item = db.get(Item, item_id, populate_existing=True)
         if item is None:
             raise NotFoundError("Item", item_id)
 
@@ -331,8 +343,12 @@ def update_item(
         db.commit()
         db.refresh(item)
 
-        resolved_thumbnail = _resolve_edit_thumbnail(item, data, thumbnail_upload)
-        if resolved_thumbnail is not None:
+        if resolved_thumbnail is not None and resolved_thumbnail.owned and item.thumbnail_file is not None:
+            # Lost the race: the item picked up a thumbnail some other way
+            # while our auto-fetch above was in flight (unlocked). Keep that
+            # one and discard ours instead of overwriting it.
+            resolved_thumbnail.upload.path.unlink(missing_ok=True)
+        elif resolved_thumbnail is not None:
             _apply_thumbnail(db, item, resolved_thumbnail, drive_client)
             db.refresh(item)
 

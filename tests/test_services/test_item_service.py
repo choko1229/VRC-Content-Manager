@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
+from app.db.session import db_write_lock, get_sessionmaker
 from app.drive import folder_layout
 from app.drive.fake_drive_client import _FOLDER_MIME_TYPE, FakeDriveClient
 from app.models.item import Item, ItemCategory
@@ -445,6 +447,65 @@ def test_update_item_does_not_overwrite_existing_thumbnail_via_auto_fetch(
 
     item = app_db_session.get(Item, created.id)
     assert item.thumbnail_file.original_filename == "keep.png"
+
+
+def test_update_item_does_not_hold_db_write_lock_during_thumbnail_fetch(
+    tmp_path: Path, migrated_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The BOOTH thumbnail auto-fetch is a network call -- it must run before
+    # db_write_lock is taken (see update_item), not while holding it, or
+    # every other save in the app would stall for however long it takes.
+    # Proven here by blocking the fetch mid-flight on a separate thread and
+    # confirming the lock is still acquirable from this thread meanwhile.
+    session_local = get_sessionmaker()
+    setup_session = session_local()
+    try:
+        created = _create_item(setup_session, tmp_path, name="Fetch Me")
+        item_id = created.id
+    finally:
+        setup_session.close()
+
+    fetch_started = threading.Event()
+    release_fetch = threading.Event()
+
+    def _blocking_fetch(url: str):
+        fetch_started.set()
+        assert release_fetch.wait(timeout=5), "test did not release the fetch in time"
+        return None
+
+    monkeypatch.setattr(thumbnail_service, "try_fetch_thumbnail", _blocking_fetch)
+
+    errors: list[BaseException] = []
+
+    def _run_update() -> None:
+        bg_session = session_local()
+        try:
+            item_service.update_item(
+                bg_session,
+                item_id,
+                ItemUpdate(name="Fetch Me", shop_name="Shop", product_url="https://booth.example/items/1"),
+            )
+        except BaseException as exc:  # pragma: no cover -- surfaced via `errors` below
+            errors.append(exc)
+        finally:
+            bg_session.close()
+
+    thread = threading.Thread(target=_run_update)
+    thread.start()
+    try:
+        assert fetch_started.wait(timeout=5), "thumbnail fetch never started"
+
+        acquired = db_write_lock.acquire(timeout=1)
+        try:
+            assert acquired, "db_write_lock was held during the thumbnail network fetch"
+        finally:
+            if acquired:
+                db_write_lock.release()
+    finally:
+        release_fetch.set()
+        thread.join(timeout=5)
+
+    assert not errors
 
 
 def test_update_item_metadata_still_saves_when_thumbnail_upload_fails(

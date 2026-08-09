@@ -28,6 +28,13 @@ Root/upload/file folders are resolved via get_or_create_folder, which
 transparently recreates them if deleted directly in Drive -- no
 special-cased "was it deleted?" branch needed here.
 
+`db_write_lock` (see app/db/session.py) is only ever held around the local
+DB writes below, never around the (many, per-file) Drive network calls this
+sweep makes -- an item edit takes the same lock, and a whole reconcile
+sweep's worth of network round-trips held under it would stall every save
+in the app for as long as the sweep runs, for no protective reason
+(busy_timeout races are a purely local-SQLite concern).
+
 Each item/file processed by the import, migrate, and broken-reference sweeps
 is committed (or rolled back) independently rather than batching a whole
 sweep into one commit -- one bad file (an unexpected exception, a Drive call
@@ -111,19 +118,13 @@ def _default_status(db: Session) -> Status | None:
 
 
 def reconcile(db: Session, drive_client: DriveClient) -> ReconcileResult:
-    # Held for the whole sweep (not just around individual commits): this
-    # runs on its own thread and can otherwise overlap with the other
-    # background DB-writing flows (upload_sync_service, drive_sync_service,
-    # item_service's dedup sweep) closely enough to lose SQLite's
-    # busy_timeout race -- see db_write_lock's docstring.
-    with db_write_lock:
-        file_folder_id = folder_layout.ensure_file_folder(drive_client)
-        upload_folder_id = folder_layout.ensure_upload_folder(drive_client)
+    file_folder_id = folder_layout.ensure_file_folder(drive_client)
+    upload_folder_id = folder_layout.ensure_upload_folder(drive_client)
 
-        migrated = _migrate_legacy_files(db, drive_client, file_folder_id)
-        imported = _import_unknown_files(db, drive_client, upload_folder_id, file_folder_id)
-        imported += _import_unknown_files(db, drive_client, file_folder_id, file_folder_id)
-        removed = _remove_broken_references(db, drive_client)
+    migrated = _migrate_legacy_files(db, drive_client, file_folder_id)
+    imported = _import_unknown_files(db, drive_client, upload_folder_id, file_folder_id)
+    imported += _import_unknown_files(db, drive_client, file_folder_id, file_folder_id)
+    removed = _remove_broken_references(db, drive_client)
 
     if removed or imported or migrated:
         drive_sync_service.mark_dirty()
@@ -158,8 +159,9 @@ def _remove_broken_references(db: Session, drive_client: DriveClient) -> int:
                 file.drive_file_id,
                 file.original_filename,
             )
-            db.delete(file)
-            db.commit()
+            with db_write_lock:
+                db.delete(file)
+                db.commit()
             removed += 1
     return removed
 
@@ -188,8 +190,9 @@ def _migrate_legacy_files(db: Session, drive_client: DriveClient, file_folder_id
                 exc_info=True,
             )
             continue
-        file.drive_folder_id = file_folder_id
-        db.commit()
+        with db_write_lock:
+            file.drive_folder_id = file_folder_id
+            db.commit()
         migrated += 1
     return migrated
 
@@ -214,8 +217,15 @@ def _import_unknown_files(
     for f in new_files:
         groups.setdefault(_stem_of(f.name), []).append(f)
 
-    status = _default_status(db)
-    shop = shop_service.get_or_create_shop(db, name=_UNASSIGNED_SHOP_NAME, url=None)
+    with db_write_lock:
+        status = _default_status(db)
+        # get_or_create_shop may flush an insert without committing -- commit
+        # here so no transaction is left open across this function's later
+        # (unlocked) Drive network calls, which would otherwise hold
+        # SQLite's real write lock for their whole duration regardless of
+        # db_write_lock.
+        shop = shop_service.get_or_create_shop(db, name=_UNASSIGNED_SHOP_NAME, url=None)
+        db.commit()
     imported = 0
 
     for group in groups.values():
@@ -235,32 +245,42 @@ def _import_unknown_files(
             continue
 
         for primary in primaries:
-            try:
-                item = Item(
-                    shop=shop,
-                    name=_derive_name(primary.name),
-                    file_format=_extension_of(primary.name).lstrip("."),
-                    status=status,
-                )
-                db.add(item)
-                db.flush()
+            # Network moves happen first, entirely outside db_write_lock and
+            # before any local transaction is opened -- once the lock below
+            # is taken, only local (fast) work happens under it, right
+            # through to commit.
+            primary_folder_id = _move_file(drive_client, primary, source_folder_id, file_folder_id)
+            thumbnail_folder_id = (
+                _move_file(drive_client, thumbnail, source_folder_id, file_folder_id)
+                if thumbnail is not None
+                else None
+            )
 
-                _move_and_attach(
-                    db, drive_client, item.id, FileRole.PRIMARY, primary, source_folder_id, file_folder_id
-                )
-                if thumbnail is not None:
-                    _move_and_attach(
-                        db, drive_client, item.id, FileRole.THUMBNAIL, thumbnail, source_folder_id, file_folder_id
+            try:
+                with db_write_lock:
+                    item = Item(
+                        shop=shop,
+                        name=_derive_name(primary.name),
+                        file_format=_extension_of(primary.name).lstrip("."),
+                        status=status,
                     )
-                db.add(License(item_id=item.id))
-                db.commit()
+                    db.add(item)
+                    db.flush()
+
+                    db.add(_build_item_file(item.id, FileRole.PRIMARY, primary, primary_folder_id))
+                    if thumbnail is not None:
+                        db.add(_build_item_file(item.id, FileRole.THUMBNAIL, thumbnail, thumbnail_folder_id))
+                    db.add(License(item_id=item.id))
+                    db.commit()
+                    item_id, item_name = item.id, item.name
             except Exception:
-                # One poisoned file (an unexpected error, not just a Drive
-                # hiccup already handled inside _move_and_attach) must not
+                # One poisoned file (an unexpected error, not a Drive hiccup
+                # -- those are already handled inside _move_file) must not
                 # discard every other file already imported successfully in
                 # this same sweep -- roll back just this item and keep going;
                 # it'll be retried as a fresh "unknown" file next run.
-                db.rollback()
+                with db_write_lock:
+                    db.rollback()
                 logger.exception(
                     "Drive reconcile: failed to import '%s' as a new item (skipped, will retry next run)",
                     primary.name,
@@ -270,36 +290,31 @@ def _import_unknown_files(
             imported += 1
             logger.info(
                 "Drive reconcile: imported new item id=%s name=%r from Drive file '%s'",
-                item.id,
-                item.name,
+                item_id,
+                item_name,
                 primary.name,
             )
 
     return imported
 
 
-def _move_and_attach(
-    db: Session,
-    drive_client: DriveClient,
-    item_id: int,
-    role: FileRole,
-    drive_file: DriveFile,
-    old_parent_id: str,
-    new_parent_id: str,
-) -> None:
-    folder_id = old_parent_id
-    if old_parent_id != new_parent_id:
-        try:
-            drive_client.move_file(file_id=drive_file.id, new_parent_id=new_parent_id, old_parent_id=old_parent_id)
-            folder_id = new_parent_id
-        except DriveError:
-            logger.warning(
-                "Drive reconcile: failed to move '%s' into file/ folder; leaving reference pointed at its "
-                "current folder (non-fatal)",
-                drive_file.name,
-                exc_info=True,
-            )
-    db.add(_build_item_file(item_id, role, drive_file, folder_id))
+def _move_file(drive_client: DriveClient, drive_file: DriveFile, old_parent_id: str, new_parent_id: str) -> str:
+    """Best-effort move; returns the folder id the file actually ends up in
+    (old_parent_id if the move failed or wasn't needed). Pure Drive network
+    call -- no DB access, so it never needs db_write_lock."""
+    if old_parent_id == new_parent_id:
+        return old_parent_id
+    try:
+        drive_client.move_file(file_id=drive_file.id, new_parent_id=new_parent_id, old_parent_id=old_parent_id)
+        return new_parent_id
+    except DriveError:
+        logger.warning(
+            "Drive reconcile: failed to move '%s' into file/ folder; leaving reference pointed at its "
+            "current folder (non-fatal)",
+            drive_file.name,
+            exc_info=True,
+        )
+        return old_parent_id
 
 
 def _build_item_file(item_id: int, role: FileRole, drive_file: DriveFile, folder_id: str) -> ItemFile:

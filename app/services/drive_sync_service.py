@@ -10,6 +10,13 @@
   `sync_interval_seconds`, see app_config_service) rather than per-write, to
   avoid thrashing the Drive API quota. Also flushed once on graceful
   shutdown and via a manual "sync now" action.
+- Lock scope: `db_write_lock` (see app/db/session.py) is only ever held
+  around the local SQLite reads/writes in this module -- never around a
+  Drive network call. Every interactive item edit also takes this same
+  lock, so a network round-trip held under it (this used to wrap the whole
+  snapshot+upload) would stall every save in the app for however long that
+  request takes, which is unrelated to what the lock actually protects
+  against (SQLite's busy_timeout race between concurrent local writers).
 - Snapshotting: the live SQLite file is never uploaded directly. `VACUUM
   INTO` takes a consistent point-in-time copy first, so a page mid-write is
   never uploaded. Requires `--workers 1` (single writer) by design.
@@ -127,15 +134,18 @@ def complete_first_run_setup(
 
 def _record_push_metadata(db: Session, drive_client: DriveClient, drive_file_id: str) -> None:
     now = datetime.now(timezone.utc)
-    app_settings_service.set_setting(db, _SETTING_LAST_PUSHED_AT, now.isoformat())
+    modified_time_iso: str | None = None
     try:
         meta = drive_client.get_metadata(drive_file_id)
         if meta.modified_time:
-            app_settings_service.set_setting(
-                db, _SETTING_LAST_KNOWN_REMOTE_MODIFIED, meta.modified_time.isoformat()
-            )
+            modified_time_iso = meta.modified_time.isoformat()
     except Exception:
         logger.exception("could not confirm Drive modifiedTime after push (non-fatal)")
+
+    with db_write_lock:
+        app_settings_service.set_setting(db, _SETTING_LAST_PUSHED_AT, now.isoformat())
+        if modified_time_iso:
+            app_settings_service.set_setting(db, _SETTING_LAST_KNOWN_REMOTE_MODIFIED, modified_time_iso)
 
 
 def flush_now(db: Session, *, drive_client: DriveClient | None = None) -> bool:
@@ -148,11 +158,6 @@ def flush_now(db: Session, *, drive_client: DriveClient | None = None) -> bool:
     if not _dirty:
         return False
 
-    # Held for the whole push (not just around individual commits): this
-    # runs on its own thread and can otherwise overlap with the other
-    # background DB-writing flows (upload_sync_service, drive_reconcile_service,
-    # item_service's dedup sweep) closely enough to lose SQLite's
-    # busy_timeout race -- see db_write_lock's docstring.
     with db_write_lock:
         drive_file_id = app_settings_service.get_setting(db, _SETTING_DRIVE_DB_FILE_ID)
         if not drive_file_id:
@@ -166,22 +171,31 @@ def flush_now(db: Session, *, drive_client: DriveClient | None = None) -> bool:
                 logger.warning("skipping Drive sync: not connected")
                 return False
 
-        drive_file_id = _ensure_db_file_exists(db, drive_client, drive_file_id)
+    # Everything from here on is either a Drive network call or (briefly,
+    # internally locked) a local snapshot copy -- deliberately outside
+    # db_write_lock so this doesn't stall interactive saves for however long
+    # the upload takes. See the module docstring.
+    drive_file_id = _ensure_db_file_exists(db, drive_client, drive_file_id)
 
-        settings = get_settings()
-        tmp_snapshot = settings.data_dir / "tmp" / f"sync_snapshot_{uuid.uuid4().hex}.db"
-        try:
+    settings = get_settings()
+    tmp_snapshot = settings.data_dir / "tmp" / f"sync_snapshot_{uuid.uuid4().hex}.db"
+    try:
+        with db_write_lock:
             snapshot_db_to(tmp_snapshot)
-            drive_client.update_file_content(
-                file_id=drive_file_id, local_path=tmp_snapshot, mime_type="application/x-sqlite3"
-            )
-        finally:
-            tmp_snapshot.unlink(missing_ok=True)
+            # Reset now, while still holding the lock, rather than after the
+            # (unlocked) upload below -- any write that lands once this lock
+            # is released is naturally captured for the *next* flush cycle
+            # instead of being silently dropped by a late reset here.
+            _dirty = False
+        drive_client.update_file_content(
+            file_id=drive_file_id, local_path=tmp_snapshot, mime_type="application/x-sqlite3"
+        )
+    finally:
+        tmp_snapshot.unlink(missing_ok=True)
 
-        _record_push_metadata(db, drive_client, drive_file_id)
-        _dirty = False
-        logger.info("synced local database to Drive (file_id=%s)", drive_file_id)
-        return True
+    _record_push_metadata(db, drive_client, drive_file_id)
+    logger.info("synced local database to Drive (file_id=%s)", drive_file_id)
+    return True
 
 
 def _ensure_db_file_exists(db: Session, drive_client: DriveClient, drive_file_id: str) -> str:
@@ -210,7 +224,8 @@ def _ensure_db_file_exists(db: Session, drive_client: DriveClient, drive_file_id
     settings = get_settings()
     tmp_snapshot = settings.data_dir / "tmp" / f"recover_snapshot_{uuid.uuid4().hex}.db"
     try:
-        snapshot_db_to(tmp_snapshot)
+        with db_write_lock:
+            snapshot_db_to(tmp_snapshot)
         drive_file = drive_client.upload_file(
             local_path=tmp_snapshot,
             name=folder_layout.DB_FILE_NAME,
@@ -220,7 +235,8 @@ def _ensure_db_file_exists(db: Session, drive_client: DriveClient, drive_file_id
     finally:
         tmp_snapshot.unlink(missing_ok=True)
 
-    app_settings_service.set_setting(db, _SETTING_DRIVE_DB_FILE_ID, drive_file.id)
+    with db_write_lock:
+        app_settings_service.set_setting(db, _SETTING_DRIVE_DB_FILE_ID, drive_file.id)
     logger.info("recreated Drive DB file (new drive_db_file_id=%s)", drive_file.id)
     return drive_file.id
 
