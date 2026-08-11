@@ -19,11 +19,16 @@
 {% if variant == "primary" %}
   {% set v = "bg-accent dark:bg-accent-dark text-white dark:text-slate-950 shadow-md shadow-accent/30 hover:brightness-95 focus-visible:outline-accent dark:focus-visible:outline-accent-dark" %}
 {% elif variant == "danger" %}
-  {% set v = "bg-white/70 dark:bg-white/10 border border-danger/60 dark:border-danger-dark/60 text-danger dark:text-danger-dark backdrop-blur hover:bg-danger hover:text-white dark:hover:bg-danger-dark dark:hover:text-slate-950 focus-visible:outline-danger dark:focus-visible:outline-danger-dark" %}
+  {# No backdrop-blur -- these buttons always sit on an already-blurred
+     glass panel (or the flat page background), so their own blur layer
+     would only resample an already-blurred backdrop for no visible gain
+     while adding a real compositing cost, especially where several of
+     these render close together (e.g. table/card action rows). #}
+  {% set v = "bg-white/70 dark:bg-white/10 border border-danger/60 dark:border-danger-dark/60 text-danger dark:text-danger-dark hover:bg-danger hover:text-white dark:hover:bg-danger-dark dark:hover:text-slate-950 focus-visible:outline-danger dark:focus-visible:outline-danger-dark" %}
 {% elif variant == "plain" %}
   {% set v = "text-accent dark:text-accent-dark hover:underline focus-visible:outline-accent dark:focus-visible:outline-accent-dark px-2" %}
 {% else %}
-  {% set v = "bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 focus-visible:outline-accent dark:focus-visible:outline-accent-dark" %}
+  {% set v = "bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 focus-visible:outline-accent dark:focus-visible:outline-accent-dark" %}
 {% endif %}
 {% if href %}
 <a href="{{ href }}" class="{{ base }} {{ v }} {{ extra }}" {{ attrs|safe }}>{% if icon %}<span class="icon text-[1.15rem]" aria-hidden="true">{{ icon }}</span>{% endif %}{{ label }}</a>
@@ -32,7 +37,11 @@
 {% endif %}
 {% endmacro %}
 
-{% set input_classes = "block w-full min-h-11 mt-1.5 px-3.5 py-2 rounded-xl border border-slate-300/70 dark:border-white/15 bg-white/70 dark:bg-white/5 backdrop-blur text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:focus-visible:ring-accent-dark focus:border-accent dark:focus:border-accent-dark transition" %}
+{# No backdrop-blur here (see the btn macro above for why) -- every field
+   using this already sits inside an already-blurred glass panel (filter
+   form, sidebar edit panel, bulk-edit bar), so a form with several fields
+   was stacking that many redundant blur layers on top of one another. #}
+{% set input_classes = "block w-full min-h-11 mt-1.5 px-3.5 py-2 rounded-xl border border-slate-300/70 dark:border-white/15 bg-white/70 dark:bg-white/5 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:focus-visible:ring-accent-dark focus:border-accent dark:focus:border-accent-dark transition" %}
 
 {% macro label_for(field_id, text, required=False, help_text=none) %}
 <label for="{{ field_id }}" class="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-0">
@@ -155,7 +164,11 @@
 {% endmacro %}
 
 {% macro chip(text) %}
-<span class="inline-flex items-center rounded-full bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/15 px-3 py-0.5 text-xs text-slate-700 dark:text-slate-200 backdrop-blur">{{ text }}</span>
+{# No backdrop-blur -- used once per tag per card/row, so on a long list
+   this was adding one compositing layer per tag shown (easily hundreds on
+   a full page) for an effect nobody could actually see stacked that many
+   times over. #}
+<span class="inline-flex items-center rounded-full bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/15 px-3 py-0.5 text-xs text-slate-700 dark:text-slate-200">{{ text }}</span>
 {% endmacro %}
 
 {% macro suggestion_chip(field_id, value) %}
@@ -180,7 +193,7 @@
   <label class="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">対応アバター</label>
   <div class="flex flex-wrap gap-1.5">
     {% for a in avatar_options %}
-    <label class="inline-flex items-center gap-1.5 rounded-full bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/15 pl-1 pr-3 py-1 min-h-8 text-xs text-slate-700 dark:text-slate-200 backdrop-blur cursor-pointer has-[:checked]:bg-accent/15 has-[:checked]:border-accent/50 dark:has-[:checked]:bg-accent-dark/15 dark:has-[:checked]:border-accent-dark/50">
+    <label class="inline-flex items-center gap-1.5 rounded-full bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/15 pl-1 pr-3 py-1 min-h-8 text-xs text-slate-700 dark:text-slate-200 cursor-pointer has-[:checked]:bg-accent/15 has-[:checked]:border-accent/50 dark:has-[:checked]:bg-accent-dark/15 dark:has-[:checked]:border-accent-dark/50">
       <input type="checkbox" name="avatars" value="{{ a.id }}" {% if a.id in checked_ids %}checked{% endif %}
              class="w-4 h-4 rounded border-slate-300 dark:border-white/20 text-accent dark:text-accent-dark focus-visible:ring-2 focus-visible:ring-accent dark:focus-visible:ring-accent-dark">
       {% if a.has_thumbnail %}<img src="/items/{{ a.item_id }}/thumbnail" alt="" class="w-5 h-5 rounded-full object-cover">{% endif %}

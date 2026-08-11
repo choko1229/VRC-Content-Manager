@@ -53,13 +53,13 @@
          wouldn't say which of several files it grabs. #}
       <div class="space-y-1">
         <a href="/api/v1/items/{{ item.id }}/download" title="{{ item.primary_file_name or '' }}"
-           class="flex items-center justify-between gap-2 min-h-8 px-2.5 rounded-lg text-xs bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 transition">
+           class="flex items-center justify-between gap-2 min-h-8 px-2.5 rounded-lg text-xs bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 transition">
           <span class="truncate">{{ item.primary_file_name }}</span>
           <span class="icon text-[1rem] shrink-0" aria-hidden="true">download</span>
         </a>
         {% for f in item.attachment_files %}
         <a href="/api/v1/items/{{ item.id }}/files/{{ f.id }}/download" title="{{ f.original_filename }}"
-           class="flex items-center justify-between gap-2 min-h-8 px-2.5 rounded-lg text-xs bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 transition">
+           class="flex items-center justify-between gap-2 min-h-8 px-2.5 rounded-lg text-xs bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 transition">
           <span class="truncate">{{ f.original_filename }}</span>
           <span class="icon text-[1rem] shrink-0" aria-hidden="true">download</span>
         </a>
@@ -67,7 +67,7 @@
       </div>
       {% else %}
       <a href="/api/v1/items/{{ item.id }}/download" title="{{ item.primary_file_name or '' }}"
-         class="inline-flex items-center justify-center gap-2 min-h-11 min-w-11 w-full px-5 rounded-full font-semibold text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+         class="inline-flex items-center justify-center gap-2 min-h-11 min-w-11 w-full px-5 rounded-full font-semibold text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
         <span class="icon text-[1.15rem]" aria-hidden="true">download</span>ダウンロード
       </a>
       {% endif %}

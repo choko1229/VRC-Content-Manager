@@ -20,6 +20,10 @@ data/
 # uv
 uv.lock.bak
 
+# node (Tailwind CSS build tooling only -- not needed at runtime, see
+# package.json/tailwind.config.js; app/static/css/tailwind.css IS committed)
+node_modules/
+
 # OS
 .DS_Store
 Thumbs.db

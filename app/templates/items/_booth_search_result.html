@@ -9,7 +9,7 @@
        to catch a bad match). The candidate's own name/shop_name/
        thumbnail_url ride along as a fallback shown if that route's deeper
        fetch fails. #}
-    <button type="button" class="js-booth-suggestion group flex items-center gap-2 w-full sm:w-auto sm:max-w-[16rem] text-left rounded-xl border border-white/70 dark:border-white/15 bg-white/60 dark:bg-white/10 backdrop-blur px-2.5 py-2 hover:bg-accent/10 dark:hover:bg-accent-dark/10 hover:border-accent/40 dark:hover:border-accent-dark/40 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark"
+    <button type="button" class="js-booth-suggestion group flex items-center gap-2 w-full sm:w-auto sm:max-w-[16rem] text-left rounded-xl border border-white/70 dark:border-white/15 bg-white/60 dark:bg-white/10 px-2.5 py-2 hover:bg-accent/10 dark:hover:bg-accent-dark/10 hover:border-accent/40 dark:hover:border-accent-dark/40 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark"
             hx-get="/fragments/items/booth-preview?product_url={{ r.product_url | urlencode }}&name={{ r.name | urlencode }}&shop_name={{ (r.shop_name or '') | urlencode }}&thumbnail_url={{ (r.thumbnail_url or '') | urlencode }}"
             hx-target="#booth-preview-modal-root" hx-swap="innerHTML">
       {% if r.thumbnail_url %}

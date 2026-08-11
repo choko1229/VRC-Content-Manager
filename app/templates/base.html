@@ -18,24 +18,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: "class",
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['"Noto Sans JP"', "-apple-system", "BlinkMacSystemFont", '"Segoe UI"', "sans-serif"],
-          },
-          colors: {
-            accent: { DEFAULT: "#0062CC", dark: "#409CFF" },
-            danger: { DEFAULT: "#D70015", dark: "#FF6961" },
-            success: { DEFAULT: "#1D7D34", dark: "#32D74B" },
-          },
-        },
-      },
-    };
-  </script>
+  {# Precompiled at dev time (see package.json's build:css / tailwind.config.js)
+     -- no runtime JIT compiler or DOM-mutation observer, unlike the Play CDN
+     script this replaced. Run `npm run build:css` after changing any Tailwind
+     classes in app/templates/**/*.html, then commit the regenerated file. #}
+  <link rel="stylesheet" href="/static/css/tailwind.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/css/style.css?v={{ asset_version }}">
   <script src="/static/js/htmx.min.js?v={{ asset_version }}"></script>
   <script>
@@ -62,7 +49,9 @@
       </a>
 
       <div class="ml-auto flex items-center gap-1.5">
-        <div class="inline-flex rounded-full border border-white/60 dark:border-white/10 bg-white/50 dark:bg-white/5 backdrop-blur p-1" role="group" aria-label="表示モード">
+        {# No backdrop-blur -- already inside the header's own blurred bar,
+           so this would just be a second blur layer sampling the first. #}
+        <div class="inline-flex rounded-full border border-white/60 dark:border-white/10 bg-white/50 dark:bg-white/5 p-1" role="group" aria-label="表示モード">
           {% set theme_options = [("device", "devices", "端末"), ("light", "light_mode", "ライト"), ("dark", "dark_mode", "ダーク")] %}
           {% for value, icon, label in theme_options %}
           <button type="button" class="js-theme-btn inline-flex items-center justify-center min-h-8 min-w-8 w-8 h-8 rounded-full transition text-slate-600 dark:text-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark"

@@ -1,0 +1,12 @@
+{
+  "name": "vrc-content-manager",
+  "private": true,
+  "description": "Dev-only Tailwind CSS build for VRC Content Manager. Not needed at runtime -- the app serves the precompiled app/static/css/tailwind.css committed to the repo.",
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i app/static/css/tailwind_input.css -o app/static/css/tailwind.css --minify",
+    "watch:css": "tailwindcss -c tailwind.config.js -i app/static/css/tailwind_input.css -o app/static/css/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.13"
+  }
+}

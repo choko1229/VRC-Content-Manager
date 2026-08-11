@@ -13,7 +13,7 @@
    items/_booth_search_result.html / booth_preview_fragment) -- an exact
    filename match is high confidence, but still worth a glance before
    linking. #}
-<button type="button" class="js-booth-suggestion group flex items-center gap-2 w-full sm:w-auto sm:max-w-[16rem] text-left rounded-xl border-2 border-accent/50 dark:border-accent-dark/50 bg-accent/5 dark:bg-accent-dark/10 backdrop-blur px-2.5 py-2 hover:bg-accent/10 dark:hover:bg-accent-dark/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark"
+<button type="button" class="js-booth-suggestion group flex items-center gap-2 w-full sm:w-auto sm:max-w-[16rem] text-left rounded-xl border-2 border-accent/50 dark:border-accent-dark/50 bg-accent/5 dark:bg-accent-dark/10 px-2.5 py-2 hover:bg-accent/10 dark:hover:bg-accent-dark/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark"
         hx-get="/fragments/items/booth-preview?product_url={{ match.product_url | urlencode }}&name={{ match.product_name | urlencode }}&shop_name={{ (match.shop_name or '') | urlencode }}&thumbnail_url={{ (match.thumbnail_url or '') | urlencode }}"
         hx-target="#booth-preview-modal-root" hx-swap="innerHTML">
   {% if match.thumbnail_url %}

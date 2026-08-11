@@ -57,7 +57,7 @@
        hx-target-inheritance reason as booth-library-match above. #}
     <button type="button" hx-post="/fragments/items/{{ item_id }}/refresh-from-booth"
             hx-target="#refresh-from-booth-result" hx-swap="innerHTML" hx-indicator="#refresh-from-booth-indicator"
-            class="inline-flex items-center gap-1.5 min-h-8 px-3 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+            class="inline-flex items-center gap-1.5 min-h-8 px-3 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
       <span class="icon text-[0.95rem]" aria-hidden="true">sync</span>BOOTHの最新情報に更新
     </button>
     <p id="refresh-from-booth-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
@@ -79,7 +79,7 @@
     <button type="button" hx-get="/fragments/items/booth-search"
             hx-vals='js:{q: document.getElementById("f-name").value}'
             hx-target="#booth-suggestions" hx-swap="outerHTML" hx-indicator="#booth-search-indicator"
-            class="inline-flex items-center gap-1.5 min-h-8 px-3 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 backdrop-blur hover:bg-white/80 dark:hover:bg-white/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+            class="inline-flex items-center gap-1.5 min-h-8 px-3 rounded-full text-xs font-semibold bg-white/60 dark:bg-white/10 border border-white/70 dark:border-white/20 text-slate-800 dark:text-slate-100 hover:bg-white/80 dark:hover:bg-white/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
       <span class="icon text-[0.95rem]" aria-hidden="true">search</span>ファイル名で検索
     </button>
     <p id="booth-search-indicator" class="htmx-indicator inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400" role="status">
@@ -112,7 +112,7 @@
 
     {{ ui.avatar_checkbox_group(avatar_options, checked_avatar_ids) }}
 
-    <div class="rounded-2xl border border-white/60 dark:border-white/10 bg-white/40 dark:bg-white/5 backdrop-blur p-3">
+    <div class="rounded-2xl border border-white/60 dark:border-white/10 bg-white/40 dark:bg-white/5 p-3">
       <label class="flex items-center gap-2.5 min-h-9 text-sm font-medium text-slate-700 dark:text-slate-200 cursor-pointer">
         <input id="f-is_avatar" type="checkbox" name="is_avatar" value="true" {% if is_avatar %}checked{% endif %}
                class="w-5 h-5 rounded border-slate-300 dark:border-white/20 text-accent dark:text-accent-dark focus-visible:ring-2 focus-visible:ring-accent dark:focus-visible:ring-accent-dark">
