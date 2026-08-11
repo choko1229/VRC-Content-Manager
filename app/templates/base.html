@@ -301,7 +301,15 @@
       // top-down before that stopPropagation() call exists to block anything.
       document.addEventListener("click", function (e) {
         var link = e.target.closest("a");
-        if (!link || !DOWNLOAD_HREF_RE.test(link.getAttribute("href") || "")) return;
+        // The relay flag below is the fix for a real infinite-loop bug: the
+        // dynamically-created <a> clicked after a successful HEAD (below)
+        // has the exact same download href, so without this check its own
+        // .click() call re-enters this same capture-phase listener --
+        // preventDefault() cancels that real download, fires a new HEAD,
+        // creates ANOTHER relay <a>, clicks it, and so on forever (visible
+        // as an endless stream of toasts and of "downloaded" log lines with
+        // no file ever actually saved).
+        if (!link || link.dataset.vrcDownloadRelay || !DOWNLOAD_HREF_RE.test(link.getAttribute("href") || "")) return;
         e.preventDefault();
 
         var url = link.getAttribute("href");
@@ -319,6 +327,7 @@
             }
             var a = document.createElement("a");
             a.href = url;
+            a.dataset.vrcDownloadRelay = "true";
             document.body.appendChild(a);
             a.click();
             a.remove();
