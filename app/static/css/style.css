@@ -119,3 +119,38 @@ html.dark *::-webkit-scrollbar-thumb {
 html.dark *::-webkit-scrollbar-thumb:hover {
   background-color: rgba(64, 156, 255, 0.65);
 }
+
+/* Card view density (see items/list.html's density toggle and
+   items/_results_card.html) -- chosen client-side after the card grid is
+   already rendered, so this overrides grid-template-columns directly with
+   plain CSS keyed off #item-results[data-density] rather than swapping
+   Tailwind utility classes (which only exist for combinations spelled out
+   literally in some template at build time). Comfortable (the default) is
+   untouched, still driven entirely by the Tailwind classes already on
+   .js-card-grid -- these rules only apply for the other two. */
+#item-results[data-density="compact"] .js-card-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+#item-results[data-density="large"] .js-card-grid {
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+@media (min-width: 640px) {
+  #item-results[data-density="compact"] .js-card-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  #item-results[data-density="large"] .js-card-grid { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  #item-results[data-density="compact"] .js-card-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  #item-results[data-density="large"] .js-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1280px) {
+  #item-results[data-density="compact"] .js-card-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  #item-results[data-density="large"] .js-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1536px) {
+  #item-results[data-density="compact"] .js-card-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  #item-results[data-density="large"] .js-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1920px) {
+  #item-results[data-density="compact"] .js-card-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  #item-results[data-density="large"] .js-card-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}

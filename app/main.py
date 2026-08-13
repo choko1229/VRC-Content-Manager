@@ -27,8 +27,10 @@ from app.services import (
     upload_sync_service,
 )
 from app.web.fragments import items as items_fragments
+from app.web.fragments import saved_filters as saved_filters_fragments
 from app.web.fragments import settings as settings_fragments
 from app.web.fragments import shops as shops_fragments
+from app.web.fragments import tags as tags_fragments
 from app.web.pages import auth as auth_pages
 from app.web.pages import avatars as avatars_pages
 from app.web.pages import items as items_pages
@@ -148,9 +150,11 @@ def create_app() -> FastAPI:
     app.include_router(auth_pages.router)
     app.include_router(shops_pages.router)
     app.include_router(shops_fragments.router)
+    app.include_router(tags_fragments.router)
     app.include_router(avatars_pages.router)
     app.include_router(items_pages.router)
     app.include_router(items_fragments.router)
+    app.include_router(saved_filters_fragments.router)
     app.include_router(settings_pages.router)
     app.include_router(settings_fragments.router)
     app.include_router(oauth_router.router)

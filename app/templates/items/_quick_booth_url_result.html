@@ -1,0 +1,18 @@
+{% if error %}
+<div id="quick-booth-row-{{ item_id }}" class="flex items-center gap-2 text-sm text-danger dark:text-danger-dark">
+  <span class="icon text-[1.1rem] shrink-0" aria-hidden="true">error</span>
+  <span>{{ error }}</span>
+</div>
+{% else %}
+<div id="quick-booth-row-{{ item_id }}" class="flex items-center gap-2 text-sm">
+  {% if fetched_ok %}
+  <span class="icon text-[1.1rem] shrink-0 text-success dark:text-success-dark" aria-hidden="true">check_circle</span>
+  <span class="truncate text-slate-800 dark:text-slate-100">{{ item.name }}</span>
+  {% if item.shop_name %}<span class="shrink-0 text-slate-500 dark:text-slate-400">({{ item.shop_name }})</span>{% endif %}
+  {% else %}
+  <span class="icon text-[1.1rem] shrink-0 text-amber-500" aria-hidden="true">warning</span>
+  <span class="truncate text-slate-600 dark:text-slate-300">URLは保存しましたが、BOOTHから情報を取得できませんでした。</span>
+  <a href="/items/{{ item_id }}" class="shrink-0 text-accent dark:text-accent-dark hover:underline">手動で編集<span class="sr-only">({{ item.name }})</span></a>
+  {% endif %}
+</div>
+{% endif %}

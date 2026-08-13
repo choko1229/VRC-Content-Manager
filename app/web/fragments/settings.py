@@ -6,7 +6,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.config import get_instance_config
 from app.core.csrf import verify_csrf
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import DriveError, NotFoundError
 from app.db.session import get_db
 from app.services import (
     booth_library_service,
@@ -41,6 +41,28 @@ async def sync_now(request: Request):
         "partials/sync_status.html",
         {"message": message, "is_dirty": drive_sync_service.is_dirty()},
     )
+
+
+@router.get("/storage-quota")
+async def storage_quota(request: Request, db: Session = Depends(get_db)):
+    """Auto-loads via hx-trigger="load" in settings.html (see
+    partials/booth_library_match.html for the same zero-click pattern) --
+    account-wide Drive usage against the free tier, so it reads as an
+    always-current widget rather than something you have to remember to
+    check."""
+    try:
+        quota = await run_in_threadpool(oauth_service.get_storage_quota, db)
+    except oauth_service.NotConnectedError:
+        return templates.TemplateResponse(
+            request, "partials/storage_quota.html", {"error": "Google Driveが未接続です。", "quota": None}
+        )
+    except DriveError:
+        return templates.TemplateResponse(
+            request,
+            "partials/storage_quota.html",
+            {"error": "ストレージ使用量を取得できませんでした。", "quota": None},
+        )
+    return templates.TemplateResponse(request, "partials/storage_quota.html", {"quota": quota, "error": None})
 
 
 @router.post("/integrity-check")

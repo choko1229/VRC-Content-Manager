@@ -21,12 +21,34 @@
     <tbody class="divide-y divide-white/50 dark:divide-white/5">
       {% for item in items %}
       <tr class="js-item hover:bg-white/50 dark:hover:bg-white/5 transition cursor-pointer"
-          data-item-id="{{ item.id }}" data-item-name="{{ item.name }}"
+          data-item-id="{{ item.id }}" data-item-name="{{ item.name }}" data-has-thumbnail="{{ '1' if item.has_thumbnail else '' }}"
           hx-get="/items/{{ item.id }}" hx-target="#detail-panel" hx-swap="innerHTML" hx-push-url="true">
         <td class="px-4 py-3">{% if item.is_favorite %}<span class="icon text-amber-500" role="img" aria-label="お気に入り">star</span>{% endif %}</td>
         <td class="px-4 py-3">{{ ui.file_status_dot(item.file_status) }}</td>
         <td class="px-4 py-3 font-medium">
           <a href="/items/{{ item.id }}" class="text-accent dark:text-accent-dark hover:underline">{{ item.name }}</a>
+          {% if item.group_siblings %}
+          {# Same BoothURL, different rows (typically one per compatible
+             avatar) -- see item_service._group_by_product_url. #}
+          <details class="inline-block align-middle ml-1">
+            <summary hx-on:click="event.stopPropagation()"
+                     class="inline-flex items-center min-h-5 px-1.5 rounded-full cursor-pointer select-none text-[0.7rem] font-semibold text-accent dark:text-accent-dark bg-accent/10 dark:bg-accent-dark/10 align-middle"
+                     title="同じ商品の他の登録 {{ item.group_siblings | length }}件">
+              +{{ item.group_siblings | length }}
+            </summary>
+            <ul class="mt-1 space-y-0.5 font-normal">
+              {% for sib in item.group_siblings %}
+              <li>
+                <a href="/items/{{ sib.id }}" hx-get="/items/{{ sib.id }}" hx-target="#detail-panel" hx-swap="innerHTML" hx-push-url="true"
+                   hx-on:click="event.stopPropagation()"
+                   class="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 hover:underline">
+                  {{ sib.name }}{% if sib.avatars %}<span class="text-slate-400 dark:text-slate-500">({{ sib.avatars | join(", ") }})</span>{% endif %}
+                </a>
+              </li>
+              {% endfor %}
+            </ul>
+          </details>
+          {% endif %}
         </td>
         <td class="px-4 py-3">{{ item.category_label }}</td>
         <td class="px-4 py-3">{{ item.shop_name or "" }}</td>

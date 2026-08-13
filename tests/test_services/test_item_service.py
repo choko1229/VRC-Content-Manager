@@ -94,6 +94,29 @@ def test_file_status_is_pending_then_synced_then_cached(app_db_session: Session,
     assert detail.file_status == "cached"
 
 
+def test_count_pending_sync_reflects_only_unsynced_primary_files(app_db_session: Session, tmp_path: Path) -> None:
+    assert item_service.count_pending_sync(app_db_session) == 0
+
+    pending = item_service.create_item_with_file(
+        app_db_session, data=ItemCreate(name="Pending Item", shop_name="Shop"), primary_upload=_make_upload(tmp_path)
+    )
+    assert item_service.count_pending_sync(app_db_session) == 1
+
+    synced = item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(name="Synced Item", shop_name="Shop"),
+        primary_upload=_make_upload(tmp_path, name="synced.unitypackage"),
+    )
+    fake_client = FakeDriveClient()
+    item = app_db_session.get(Item, synced.id)
+    upload_sync_service.sync_item_file(app_db_session, item.files[0].id, fake_client)
+
+    assert item_service.count_pending_sync(app_db_session) == 1  # only `pending` still counts
+
+    item_service.delete_item(app_db_session, pending.id, drive_client=fake_client)
+    assert item_service.count_pending_sync(app_db_session) == 0
+
+
 def test_search_items_exposes_file_status(app_db_session: Session, tmp_path: Path) -> None:
     upload = _make_upload(tmp_path)
     item_service.create_item_with_file(
@@ -103,6 +126,50 @@ def test_search_items_exposes_file_status(app_db_session: Session, tmp_path: Pat
     rows = item_service.search_items(app_db_session, ItemSearchFilters())
 
     assert rows[0].file_status == "pending"
+
+
+def test_search_items_groups_rows_sharing_a_product_url(
+    app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(thumbnail_service, "try_fetch_thumbnail", lambda url, **kw: None)
+    item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(name="Outfit for Avatar A", shop_name="Shop", product_url="https://booth.pm/ja/items/1"),
+        primary_upload=_make_upload(tmp_path, "a.zip"),
+    )
+    item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(name="Outfit for Avatar B", shop_name="Shop", product_url="https://booth.pm/ja/items/1"),
+        primary_upload=_make_upload(tmp_path, "b.zip"),
+    )
+    item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(name="Unrelated Item", shop_name="Shop", product_url="https://booth.pm/ja/items/2"),
+        primary_upload=_make_upload(tmp_path, "c.zip"),
+    )
+
+    rows = item_service.search_items(app_db_session, ItemSearchFilters())
+
+    assert len(rows) == 2  # the two Avatar A/B rows collapse into one anchor + sibling
+    by_name = {r.name: r for r in rows}
+    assert by_name["Unrelated Item"].group_siblings == []
+    anchor = by_name["Outfit for Avatar B"]  # created_at desc -- most recent (B) sorts first
+    assert len(anchor.group_siblings) == 1
+    assert anchor.group_siblings[0].name == "Outfit for Avatar A"
+
+
+def test_search_items_does_not_group_items_without_a_product_url(app_db_session: Session, tmp_path: Path) -> None:
+    item_service.create_item_with_file(
+        app_db_session, data=ItemCreate(name="No URL 1", shop_name="Shop"), primary_upload=_make_upload(tmp_path, "a.zip")
+    )
+    item_service.create_item_with_file(
+        app_db_session, data=ItemCreate(name="No URL 2", shop_name="Shop"), primary_upload=_make_upload(tmp_path, "b.zip")
+    )
+
+    rows = item_service.search_items(app_db_session, ItemSearchFilters())
+
+    assert len(rows) == 2
+    assert all(r.group_siblings == [] for r in rows)
 
 
 def test_create_item_with_file_makes_no_drive_call_without_explicit_client(
@@ -651,6 +718,52 @@ def test_refresh_from_booth_raises_and_records_history_when_fetch_fails(
 def test_refresh_from_booth_raises_not_found_for_missing_item(app_db_session: Session) -> None:
     with pytest.raises(NotFoundError):
         item_service.refresh_from_booth(app_db_session, 999)
+
+
+def test_apply_booth_url_links_and_fills_metadata_for_unlinked_item(
+    app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = _create_item(app_db_session, tmp_path, name="quick-link.zip")
+    info = booth_info_service.BoothProductInfo(
+        name="Quick Link Item", shop_name="Quick Shop", shop_url="https://quick.booth.pm", price=500,
+        image_url="https://example.com/thumb.png", description="説明",
+    )
+    monkeypatch.setattr(booth_info_service, "try_fetch_product_info", lambda url, **kw: info)
+    fetched = thumbnail_service.FetchedThumbnail(content=b"\x89PNG\r\n", content_type="image/png")
+    monkeypatch.setattr(thumbnail_service, "try_fetch_thumbnail", lambda url, **kw: fetched)
+
+    detail, fetched_ok = item_service.apply_booth_url(
+        app_db_session, created.id, "https://quick.booth.pm/items/1", drive_client=FakeDriveClient()
+    )
+
+    assert fetched_ok is True
+    assert detail.name == "Quick Link Item"
+    assert detail.shop_name == "Quick Shop"
+    assert detail.product_url == "https://quick.booth.pm/items/1"
+    assert detail.has_thumbnail is True
+
+
+def test_apply_booth_url_still_saves_url_when_fetch_fails(app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    created = _create_item(app_db_session, tmp_path, name="Quick Link Fail")
+    monkeypatch.setattr(booth_info_service, "try_fetch_product_info", lambda url, **kw: None)
+
+    detail, fetched_ok = item_service.apply_booth_url(app_db_session, created.id, "https://unreachable.booth.pm/items/9")
+
+    assert fetched_ok is False
+    assert detail.product_url == "https://unreachable.booth.pm/items/9"
+    assert detail.name == "Quick Link Fail"  # unchanged placeholder name
+
+
+def test_apply_booth_url_rejects_blank_url(app_db_session: Session, tmp_path: Path) -> None:
+    created = _create_item(app_db_session, tmp_path, name="quick-link-blank.zip")
+
+    with pytest.raises(ValidationError):
+        item_service.apply_booth_url(app_db_session, created.id, "   ")
+
+
+def test_apply_booth_url_raises_not_found_for_missing_item(app_db_session: Session) -> None:
+    with pytest.raises(NotFoundError):
+        item_service.apply_booth_url(app_db_session, 999, "https://booth.example/items/1")
 
 
 def test_delete_item_removes_row_and_drive_files(app_db_session: Session, tmp_path: Path) -> None:

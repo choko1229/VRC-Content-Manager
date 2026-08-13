@@ -15,9 +15,44 @@
 {% else %}
   {% if error %}{{ ui.alert(error, variant="error") }}{% endif %}
 
-  <p class="text-sm text-slate-500 dark:text-slate-400 mb-6">
-    <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" class="text-accent dark:text-accent-dark hover:underline">Google Cloud Console<span class="sr-only">(新しいタブで開く)</span></a> で「Google Drive API」を有効化し、OAuthクライアント(種類: ウェブアプリケーション)を作成してください。
-  </p>
+  {# Numbered walkthrough -- the setup page used to point at Google Cloud
+     Console with one sentence and leave everything else to the README,
+     which meant actually doing this required a second document open side
+     by side. No real product screenshots are available to embed here, so
+     this leans on being explicit about *where* each thing lives instead
+     (exact menu names, what's optional, what to expect after saving). #}
+  <div class="mb-6">
+    <h2 class="text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">セットアップ手順</h2>
+    <ol class="space-y-3">
+      {% set steps = [
+        ("Google Cloud Consoleでプロジェクトを作成し、Drive APIを有効化",
+         "プロジェクトを作成(または選択)したら「Google Drive API」を有効化してください。",
+         "https://console.cloud.google.com/apis/library/drive.googleapis.com"),
+        ("OAuthクライアントIDを作成",
+         "「APIとサービス」→「認証情報」→「認証情報を作成」→「OAuthクライアントID」。種類は「ウェブアプリケーション」を選択します。「承認済みのリダイレクトURI」はこの時点では空欄のままで構いません(手順4で確定します)。",
+         "https://console.cloud.google.com/apis/credentials"),
+        ("Client ID・Client Secretを下のフォームに貼り付けて保存",
+         "リダイレクトURIはこの画面のURLから自動入力されています(変更不要です)。",
+         none),
+        ("表示されたリダイレクトURIをGoogle Cloud Console側にも追加",
+         "保存すると自動的にGoogleの認可画面に進みます。「redirect_uri_mismatch」等のエラーになった場合は、この画面のリダイレクトURI欄の値をGoogle Cloud Console側の「承認済みのリダイレクトURI」に追加してから、もう一度保存し直してください。",
+         none),
+      ] %}
+      {% for title, desc, link in steps %}
+      <li class="flex gap-3 rounded-2xl border border-white/60 dark:border-white/10 bg-white/40 dark:bg-white/5 p-3.5">
+        <span class="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-accent dark:bg-accent-dark text-white dark:text-slate-950 text-sm font-bold" aria-hidden="true">{{ loop.index }}</span>
+        <div class="min-w-0">
+          <p class="font-medium text-slate-900 dark:text-white">
+            <span class="sr-only">手順{{ loop.index }}: </span>{{ title }}
+          </p>
+          <p class="text-sm text-slate-600 dark:text-slate-300 mt-0.5">
+            {{ desc }}{% if link %} <a href="{{ link }}" target="_blank" rel="noopener noreferrer" class="text-accent dark:text-accent-dark hover:underline">Google Cloud Consoleを開く<span class="sr-only">(新しいタブで開く)</span></a>{% endif %}
+          </p>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
 
   <form method="post" action="/setup" class="space-y-6">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
@@ -25,9 +60,9 @@
     <div>
       <h2 class="text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">Google OAuthクライアント</h2>
       <div class="grid gap-4 sm:grid-cols-2">
-        {{ ui.text_field("google_oauth_client_id", "Client ID", required=True, value=form_values.get('google_oauth_client_id', '')) }}
-        {{ ui.text_field("google_oauth_client_secret", "Client Secret", type="password", required=True) }}
-        {{ ui.text_field("google_oauth_redirect_uri", "リダイレクトURI", type="url", required=True, value=form_values.get('google_oauth_redirect_uri', ''), help_text="Google CloudのOAuthクライアント設定の「承認済みのリダイレクトURI」にこの値を追加してください。", extra="sm:col-span-2") }}
+        {{ ui.text_field("google_oauth_client_id", "Client ID", required=True, value=form_values.get('google_oauth_client_id', ''), help_text="手順2で作成したOAuthクライアントの詳細画面に表示されます。") }}
+        {{ ui.text_field("google_oauth_client_secret", "Client Secret", type="password", required=True, help_text="同じ画面にClient IDと並んで表示されます。") }}
+        {{ ui.text_field("google_oauth_redirect_uri", "リダイレクトURI", type="url", required=True, value=form_values.get('google_oauth_redirect_uri', ''), help_text="自動入力済み・通常は変更不要です。保存後、この値をGoogle Cloud Console側の「承認済みのリダイレクトURI」にも追加してください(手順4)。", extra="sm:col-span-2") }}
       </div>
     </div>
 

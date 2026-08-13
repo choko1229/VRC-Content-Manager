@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from app.drive.types import DriveFile
+from app.drive.types import DriveFile, StorageQuota
 
 
 class DriveClient(Protocol):
@@ -59,4 +59,11 @@ class DriveClient(Protocol):
         """Move a file to a new parent folder (re-parent, not copy). Used to
         relocate a file into place after intake, and to migrate legacy files
         into the current folder layout."""
+        ...
+
+    def get_storage_quota(self) -> StorageQuota:
+        """Account-wide Drive usage/limit (settings page's storage widget --
+        the free tier's 15GB is shared across Drive/Gmail/Photos, not just
+        this app's own folder, so this reports the real account total rather
+        than summing this app's own files)."""
         ...

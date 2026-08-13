@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.core.exceptions import DriveError
 from app.drive.types import FOLDER_MIME_TYPE as _FOLDER_MIME_TYPE
-from app.drive.types import DriveFile
+from app.drive.types import DriveFile, StorageQuota
 
 
 @dataclass
@@ -23,8 +23,9 @@ class _StoredFile:
 class FakeDriveClient:
     """In-memory stand-in for GoogleDriveClient, used in all automated tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, storage_limit_bytes: int | None = 15 * 1024**3) -> None:
         self._files: dict[str, _StoredFile] = {}
+        self._storage_limit_bytes = storage_limit_bytes
 
     def _new_id(self) -> str:
         return uuid.uuid4().hex
@@ -113,6 +114,10 @@ class FakeDriveClient:
         if stored is None:
             raise DriveError(f"file not found: {file_id}")
         stored.parent_id = new_parent_id
+
+    def get_storage_quota(self) -> StorageQuota:
+        usage = sum(len(stored.content) for stored in self._files.values() if stored.mime_type != _FOLDER_MIME_TYPE)
+        return StorageQuota(usage_bytes=usage, limit_bytes=self._storage_limit_bytes)
 
     # --- test-only helpers ---
     def _debug_content(self, file_id: str) -> bytes:

@@ -6,7 +6,13 @@
   ("/static/img/card-placeholder-green.svg", "text-[#137333]"),
 ] %}
 {% if items %}
-<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 [@media(min-width:1920px)]:grid-cols-6">
+{# Column count below is the "comfortable" density default; #item-results's
+   data-density attribute (see list.html's density toggle) overrides
+   grid-template-columns via plain CSS rules in style.css -- not more
+   Tailwind classes, since the density is chosen client-side after this
+   fragment is already rendered/swapped in, so there's no template
+   conditional to hang alternate utility classes off of. #}
+<div class="js-card-grid grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 [@media(min-width:1920px)]:grid-cols-6">
   {% for item in items %}
   {% set placeholder_url, placeholder_text = placeholder_variants[item.id % 4] %}
   {# No backdrop-blur here: with a flat page background there's nothing
@@ -15,7 +21,7 @@
      on surfaces that actually overlay scrolling content (header, sticky
      detail panel, toasts, dropdowns), where there's only ever one instance. #}
   <div class="js-item group relative rounded-lg border border-white/60 dark:border-white/10 bg-white/70 dark:bg-slate-900/60 shadow-lg shadow-slate-200/40 dark:shadow-black/20 overflow-hidden transition hover:bg-white/90 dark:hover:bg-slate-900/80 hover:border-accent/40 dark:hover:border-accent-dark/40"
-       data-item-id="{{ item.id }}" data-item-name="{{ item.name }}">
+       data-item-id="{{ item.id }}" data-item-name="{{ item.name }}" data-has-thumbnail="{{ '1' if item.has_thumbnail else '' }}">
     <a href="/items/{{ item.id }}"
        hx-get="/items/{{ item.id }}" hx-target="#detail-panel" hx-swap="innerHTML" hx-push-url="true"
        class="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark rounded-t-lg">
@@ -72,6 +78,32 @@
       </a>
       {% endif %}
     </div>
+    {% if item.group_siblings %}
+    {# Same BoothURL, different item rows (typically one download per
+       compatible avatar) -- see item_service._group_by_product_url. Not
+       the same thing as attachment_files above, which is one DB row with
+       several files; these are separate rows nested for display only. #}
+    <div class="px-4 pb-4 -mt-2">
+      <details class="group/sib">
+        <summary class="inline-flex items-center gap-1 min-h-7 cursor-pointer select-none text-xs font-medium text-accent dark:text-accent-dark rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+          <span class="icon text-[1rem] transition-transform motion-safe:group-open/sib:rotate-180" aria-hidden="true">expand_more</span>
+          同じ商品: 他{{ item.group_siblings | length }}件
+        </summary>
+        <ul class="mt-1.5 space-y-1">
+          {% for sib in item.group_siblings %}
+          <li>
+            <a href="/items/{{ sib.id }}" hx-get="/items/{{ sib.id }}" hx-target="#detail-panel" hx-swap="innerHTML" hx-push-url="true"
+               class="flex items-center gap-1.5 min-h-7 px-2 rounded-lg text-xs text-slate-700 dark:text-slate-200 hover:bg-white/60 dark:hover:bg-white/10 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark">
+              {{ ui.file_status_dot(sib.file_status, extra="shrink-0") }}
+              <span class="truncate">{{ sib.name }}</span>
+              {% if sib.avatars %}<span class="text-slate-400 dark:text-slate-500 truncate">({{ sib.avatars | join(", ") }})</span>{% endif %}
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+      </details>
+    </div>
+    {% endif %}
   </div>
   {% endfor %}
 </div>

@@ -11,6 +11,9 @@
   <p class="text-sm text-slate-500 dark:text-slate-400">Drive上のデータベースファイルID: {{ drive_db_file_id or "-" }}</p>
   <p class="text-sm text-slate-500 dark:text-slate-400">最終同期: {{ last_pushed_at or "まだ同期していません" }}</p>
   <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">自動同期間隔: {{ sync_interval_seconds }}秒(変更を検知してからのデバウンス間隔)</p>
+  <div id="storage-quota" class="mb-4" hx-get="/fragments/settings/storage-quota" hx-trigger="load" hx-swap="innerHTML">
+    <p class="text-xs text-slate-400 dark:text-slate-500">ストレージ使用量を確認中…</p>
+  </div>
   <div id="sync-status" aria-live="polite"></div>
   <div class="flex flex-wrap items-center gap-3">
     {{ ui.btn("今すぐ同期", variant="primary", icon="sync", type="button",
@@ -163,6 +166,16 @@
 </form>
 <div id="shop-list">
   {% include "shops/_table.html" %}
+</div>
+{% endcall %}
+
+{% call ui.glass(extra="mb-6") %}
+<h2 class="text-lg font-medium mb-4">タグ管理</h2>
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-4">
+  タグ名をクリックして書き換えると、その場でリネームされます。既存の別のタグと同じ名前に変更すると、そのタグへ統合されます(統合先に商品がまとめられ、元のタグは削除されます)。
+</p>
+<div id="tag-list">
+  {% include "partials/tag_table.html" %}
 </div>
 {% endcall %}
 

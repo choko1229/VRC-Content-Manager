@@ -51,6 +51,45 @@ def _make_client(monkeypatch: pytest.MonkeyPatch, downloader_cls) -> gdc.GoogleD
     return client
 
 
+def test_get_storage_quota_parses_usage_and_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = gdc.GoogleDriveClient(credentials=MagicMock())
+    fake_service = MagicMock()
+    fake_service.about.return_value.get.return_value.execute.return_value = {
+        "storageQuota": {"usage": "12345", "limit": "16106127360"}
+    }
+    monkeypatch.setattr(client, "_get_service", lambda: fake_service)
+
+    quota = client.get_storage_quota()
+
+    assert quota.usage_bytes == 12345
+    assert quota.limit_bytes == 16106127360
+    fake_service.about.return_value.get.assert_called_once_with(fields="storageQuota")
+
+
+def test_get_storage_quota_treats_missing_limit_as_unlimited(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = gdc.GoogleDriveClient(credentials=MagicMock())
+    fake_service = MagicMock()
+    fake_service.about.return_value.get.return_value.execute.return_value = {"storageQuota": {"usage": "500"}}
+    monkeypatch.setattr(client, "_get_service", lambda: fake_service)
+
+    quota = client.get_storage_quota()
+
+    assert quota.usage_bytes == 500
+    assert quota.limit_bytes is None
+
+
+def test_get_storage_quota_wraps_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = gdc.GoogleDriveClient(credentials=MagicMock())
+    fake_service = MagicMock()
+    response = MagicMock()
+    response.status = 500
+    fake_service.about.return_value.get.return_value.execute.side_effect = HttpError(response, b"boom")
+    monkeypatch.setattr(client, "_get_service", lambda: fake_service)
+
+    with pytest.raises(DriveError):
+        client.get_storage_quota()
+
+
 def test_download_file_writes_full_content_on_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     def factory(fh, request):
         return _FakeDownloader(fh, request, chunks=[b"hello ", b"world"])

@@ -21,6 +21,7 @@ from app.config import get_instance_config
 from app.core.exceptions import AppError
 from app.core.security import decrypt_token, encrypt_token
 from app.drive.google_drive_client import GoogleDriveClient
+from app.drive.types import StorageQuota
 from app.models.oauth_credential import OAuthCredential
 
 # Google sometimes returns a token response whose granted scope differs
@@ -179,3 +180,12 @@ def make_drive_client(db: Session) -> GoogleDriveClient:
         save_credentials(db, new_credentials)
 
     return GoogleDriveClient(credentials, on_credentials_refreshed=_on_refreshed)
+
+
+def get_storage_quota(db: Session) -> StorageQuota:
+    """Account-wide Drive usage/limit for the settings page's storage widget
+    (see app/web/fragments/settings.py: storage_quota). Routers call only
+    the service layer, never a DriveClient method directly -- this is the
+    thin wrapper that keeps that true for a call this simple, same as
+    make_drive_client above."""
+    return make_drive_client(db).get_storage_quota()

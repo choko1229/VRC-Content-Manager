@@ -1,0 +1,43 @@
+{% import "_macros.html" as ui %}
+{% if error %}{{ ui.alert(error, variant="error") }}{% endif %}
+{% if tags %}
+<div class="overflow-x-auto rounded-2xl border border-white/60 dark:border-white/10 bg-white/55 dark:bg-slate-900/40 backdrop-blur-xl shadow-lg shadow-slate-200/40 dark:shadow-black/20">
+  <table class="w-full text-sm">
+    <caption class="sr-only">登録済みタグ一覧</caption>
+    <thead>
+      <tr class="border-b border-white/60 dark:border-white/10 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        <th scope="col" class="px-4 py-3">タグ名</th>
+        <th scope="col" class="px-4 py-3">使用中の商品数</th>
+        <th scope="col" class="px-4 py-3"><span class="sr-only">操作</span></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-white/50 dark:divide-white/5">
+      {% for tag in tags %}
+      <tr class="hover:bg-white/50 dark:hover:bg-white/5 transition">
+        <td class="px-4 py-3">
+          <label for="f-tag-name-{{ tag.id }}" class="sr-only">「{{ tag.name }}」の名前</label>
+          <input id="f-tag-name-{{ tag.id }}" type="text" name="name" value="{{ tag.name }}"
+                 hx-post="/fragments/tags/{{ tag.id }}/rename" hx-trigger="blur changed"
+                 hx-target="#tag-list" hx-swap="innerHTML"
+                 class="block w-full min-w-[10rem] min-h-9 px-2.5 py-1 rounded-lg border border-transparent bg-transparent hover:bg-white/60 dark:hover:bg-white/10 focus:bg-white/80 dark:focus:bg-white/10 focus:border-accent/50 dark:focus:border-accent-dark/50 text-slate-900 dark:text-slate-100 font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:focus-visible:ring-accent-dark transition">
+        </td>
+        <td class="px-4 py-3">{{ tag.item_count }}</td>
+        <td class="px-4 py-3 text-right">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-full text-xs font-semibold border border-danger/50 dark:border-danger-dark/50 text-danger dark:text-danger-dark hover:bg-danger hover:text-white dark:hover:bg-danger-dark dark:hover:text-slate-950 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger dark:focus-visible:outline-danger-dark"
+            hx-delete="/fragments/tags/{{ tag.id }}"
+            hx-target="#tag-list"
+            hx-swap="innerHTML"
+            hx-confirm="「{{ tag.name }}」を削除しますか？{% if tag.item_count %}{{ tag.item_count }}件の商品から外れます。{% endif %}"
+            aria-label="「{{ tag.name }}」を削除"
+          ><span class="icon text-[1rem]" aria-hidden="true">delete</span><span aria-hidden="true">削除</span></button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-slate-500 dark:text-slate-400">まだタグが登録されていません。</p>
+{% endif %}

@@ -1,0 +1,23 @@
+{% if error %}
+<p class="text-xs text-slate-500 dark:text-slate-400">{{ error }}</p>
+{% elif quota %}
+{% set limit = quota.limit_bytes %}
+{% set usage_gb = quota.usage_bytes / 1073741824 %}
+{% set limit_gb = (limit / 1073741824) if limit else none %}
+{% set pct = ((quota.usage_bytes / limit) * 100) if limit else none %}
+<div>
+  <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
+    <span>Driveストレージ使用量(アカウント全体)</span>
+    <span class="font-medium text-slate-700 dark:text-slate-200">
+      {{ "%.1f"|format(usage_gb) }} GB{% if limit_gb %} / {{ "%.1f"|format(limit_gb) }} GB{% else %}(無制限){% endif %}
+    </span>
+  </div>
+  {% if pct is not none %}
+  <div class="h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+    <div class="h-full rounded-full transition-[width] duration-300 {% if pct >= 90 %}bg-danger dark:bg-danger-dark{% elif pct >= 75 %}bg-amber-500{% else %}bg-accent dark:bg-accent-dark{% endif %}"
+         style="width:{{ [pct, 100] | min }}%"></div>
+  </div>
+  <p class="text-[0.7rem] text-slate-400 dark:text-slate-500 mt-1">{{ "%.1f"|format(pct) }}% 使用中{% if pct >= 90 %} -- そろそろ空き容量にご注意ください{% endif %}</p>
+  {% endif %}
+</div>
+{% endif %}

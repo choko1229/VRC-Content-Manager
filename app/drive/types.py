@@ -14,3 +14,13 @@ class DriveFile:
     parent_id: str | None
     modified_time: datetime | None
     size_bytes: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class StorageQuota:
+    """Account-wide Drive usage (not scoped to this app's own folder) -- see
+    DriveClient.get_storage_quota. limit_bytes is None for accounts with
+    unlimited storage (Drive's about.get omits the field in that case)."""
+
+    usage_bytes: int
+    limit_bytes: int | None

@@ -14,7 +14,7 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 from app.core.exceptions import DriveError
 from app.drive.types import FOLDER_MIME_TYPE as _FOLDER_MIME_TYPE
-from app.drive.types import DriveFile
+from app.drive.types import DriveFile, StorageQuota
 
 logger = logging.getLogger(__name__)
 
@@ -228,3 +228,19 @@ class GoogleDriveClient:
                 f"move of Drive file {file_id} into {new_parent_id} did not fully apply "
                 f"(parents now: {result_parents})"
             )
+
+    def get_storage_quota(self) -> StorageQuota:
+        service = self._get_service()
+        try:
+            raw = service.about().get(fields="storageQuota").execute()
+        except HttpError as exc:
+            raise DriveError("failed to fetch Drive storage quota") from exc
+
+        quota = raw.get("storageQuota", {})
+        # "limit" is entirely absent for accounts with unlimited storage
+        # (Drive's documented behavior for about.get), not just falsy.
+        limit = quota.get("limit")
+        return StorageQuota(
+            usage_bytes=int(quota.get("usage", 0)),
+            limit_bytes=int(limit) if limit is not None else None,
+        )

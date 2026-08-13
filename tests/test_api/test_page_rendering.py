@@ -63,6 +63,40 @@ def test_shops_page_renders(page_client: TestClient) -> None:
     assert "ショップリスト" in response.text
 
 
+def _make_upload(tmp_path: Path, name: str) -> ValidatedUpload:
+    path = tmp_path / name
+    path.write_bytes(b"dummy")
+    return ValidatedUpload(
+        path=path, original_filename=name, size_bytes=5, content_type="application/octet-stream", extension=".zip"
+    )
+
+
+def test_items_list_shows_grouped_siblings_in_both_views(
+    page_client: TestClient, app_db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services import thumbnail_service
+
+    monkeypatch.setattr(thumbnail_service, "try_fetch_thumbnail", lambda url, **kw: None)
+    item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(name="Outfit A", shop_name="Shop", product_url="https://booth.pm/ja/items/1"),
+        primary_upload=_make_upload(tmp_path, "a.zip"),
+        drive_client=FakeDriveClient(),
+    )
+    item_service.create_item_with_file(
+        app_db_session,
+        data=ItemCreate(name="Outfit B", shop_name="Shop", product_url="https://booth.pm/ja/items/1"),
+        primary_upload=_make_upload(tmp_path, "b.zip"),
+        drive_client=FakeDriveClient(),
+    )
+
+    for view in ("card", "table"):
+        response = page_client.get("/items", params={"view": view})
+        assert response.status_code == 200
+        assert "Outfit B" in response.text  # the anchor (most recently created)
+        assert "Outfit A" in response.text  # the nested sibling
+
+
 def test_settings_page_includes_shop_management(page_client: TestClient) -> None:
     response = page_client.get("/settings")
 

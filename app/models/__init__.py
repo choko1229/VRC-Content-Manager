@@ -9,6 +9,7 @@ from app.models.item_dependency import ItemDependency
 from app.models.item_file import FileRole, ItemFile
 from app.models.license import License, TriState
 from app.models.oauth_credential import OAuthCredential
+from app.models.saved_filter import SavedFilter
 from app.models.shop import Shop
 from app.models.status import DEFAULT_STATUS_CODES, Status
 from app.models.tag import Tag, item_tags
@@ -28,6 +29,7 @@ __all__ = [
     "License",
     "TriState",
     "OAuthCredential",
+    "SavedFilter",
     "Shop",
     "DEFAULT_STATUS_CODES",
     "Status",

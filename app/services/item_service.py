@@ -39,6 +39,7 @@ from app.schemas.item import (
     ItemCreate,
     ItemDetail,
     ItemFileRead,
+    ItemGroupSibling,
     ItemListRow,
     ItemRead,
     ItemSearchFilters,
@@ -125,6 +126,8 @@ def _to_list_row(item: Item) -> ItemListRow:
             ItemFileRead(id=f.id, original_filename=f.original_filename, size_bytes=f.size_bytes)
             for f in item.attachment_files
         ],
+        product_url=item.product_url,
+        group_siblings=[],
     )
 
 
@@ -202,7 +205,50 @@ def search_items(db: Session, filters: ItemSearchFilters) -> list[ItemListRow]:
 
     stmt = stmt.order_by(Item.created_at.desc())
     items = db.execute(stmt).unique().scalars().all()
-    return [_to_list_row(item) for item in items]
+    return _group_by_product_url([_to_list_row(item) for item in items])
+
+
+def _group_by_product_url(rows: list[ItemListRow]) -> list[ItemListRow]:
+    """Clusters items that share a BoothURL -- typically the same product
+    downloaded once per compatible avatar -- under whichever one sorts
+    first, instead of listing each as a fully separate row (README's
+    known "同一販売URL・別対応アバターの商品をまとめて表示するグルーピング"
+    gap). Purely a display grouping over the already-filtered/sorted
+    result set: it never merges DB rows or reaches outside `rows` for a
+    sibling that didn't itself match the current search/filters.
+
+    Unrelated to the exact-filename auto-merge (see merge_item_into): that
+    combines two DB rows into one with multiple attachment_files. This only
+    nests distinct ItemListRow entries for the response, and only when
+    their product_url actually matches -- items with no product_url are
+    never grouped with anything.
+    """
+    grouped: list[ItemListRow] = []
+    anchor_by_url: dict[str, ItemListRow] = {}
+    for row in rows:
+        anchor = anchor_by_url.get(row.product_url) if row.product_url else None
+        if anchor is not None:
+            anchor.group_siblings.append(
+                ItemGroupSibling(
+                    id=row.id, name=row.name, avatars=row.avatars,
+                    has_thumbnail=row.has_thumbnail, file_status=row.file_status,
+                )
+            )
+            continue
+        if row.product_url:
+            anchor_by_url[row.product_url] = row
+        grouped.append(row)
+    return grouped
+
+
+def count_pending_sync(db: Session) -> int:
+    """Number of items whose primary file hasn't reached Drive yet (see
+    _file_status's "pending" case) -- used for the header's always-on sync
+    status pill so a backlog is visible without having to scan the list."""
+    stmt = select(func.count(ItemFile.id)).where(
+        ItemFile.file_role == FileRole.PRIMARY, ItemFile.synced_at.is_(None)
+    )
+    return db.execute(stmt).scalar_one()
 
 
 def get_item_detail(db: Session, item_id: int) -> ItemDetail:
@@ -673,6 +719,70 @@ def refresh_from_booth(db: Session, item_id: int, *, drive_client: DriveClient |
     drive_sync_service.mark_dirty()
     logger.info("refreshed item id=%s from BOOTH", item.id)
     return get_item_detail(db, item.id)
+
+
+def apply_booth_url(
+    db: Session, item_id: int, product_url: str, *, drive_client: DriveClient | None = None
+) -> tuple[ItemDetail, bool]:
+    """Quick-link path for a freshly uploaded item that has no metadata yet
+    (see the TOP page's post-upload panel: after uploading several files at
+    once, each gets a compact BoothURL field here instead of having to open
+    every item's full edit panel one at a time to paste it in). Applies
+    name/shop/description/thumbnail from the fetch the same way
+    refresh_from_booth does for an already-linked item -- this is that same
+    behavior for the *first* link rather than a re-fetch, so unlike
+    refresh_from_booth it doesn't require product_url to already be set.
+
+    A fetch failure still saves the URL itself (so pasting it isn't wasted
+    effort), just without the auto-filled fields -- the returned bool tells
+    the caller which happened (ItemDetail alone can't: a fetch that finds no
+    name/shop/description looks identical to one that never ran).
+    """
+    item = db.get(Item, item_id)
+    if item is None:
+        raise NotFoundError("Item", item_id)
+    product_url = product_url.strip()
+    if not product_url:
+        raise ValidationError("BoothURLを入力してください。")
+
+    # Network calls -- deliberately outside db_write_lock, see
+    # app/services/drive_sync_service.py's module docstring for why holding
+    # it across one would stall every other save in the app.
+    info = booth_info_service.try_fetch_product_info(product_url)
+
+    resolved_thumbnail: _ResolvedThumbnail | None = None
+    if info is not None and item.thumbnail_file is None:
+        fetched = thumbnail_service.try_fetch_thumbnail(product_url)
+        if fetched is not None:
+            resolved_thumbnail = _ResolvedThumbnail(upload=_write_fetched_thumbnail(fetched), owned=True)
+
+    with db_write_lock:
+        item = db.get(Item, item_id, populate_existing=True)
+        if item is None:
+            raise NotFoundError("Item", item_id)
+
+        item.product_url = product_url
+        if info is not None:
+            if info.name:
+                item.name = info.name
+            if info.shop_name:
+                item.shop = shop_service.get_or_create_shop(db, name=info.shop_name, url=info.shop_url)
+            if info.description:
+                item.description = info.description
+        db.commit()
+        db.refresh(item)
+
+        if resolved_thumbnail is not None and item.thumbnail_file is None:
+            _apply_thumbnail(db, item, resolved_thumbnail, drive_client)
+            db.refresh(item)
+        elif resolved_thumbnail is not None:
+            # Lost the race: something else gave this item a thumbnail while
+            # the fetch above was in flight (unlocked) -- keep that one.
+            resolved_thumbnail.upload.path.unlink(missing_ok=True)
+
+    drive_sync_service.mark_dirty()
+    logger.info("applied BoothURL to item id=%s (fetch %s)", item.id, "succeeded" if info is not None else "failed")
+    return get_item_detail(db, item.id), info is not None
 
 
 def _write_fetched_thumbnail(fetched: thumbnail_service.FetchedThumbnail) -> ValidatedUpload:

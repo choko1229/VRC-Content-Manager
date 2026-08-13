@@ -274,18 +274,25 @@
        download_file) and warms the local cache, but with no response body
        to transfer -- so a toast can track the whole wait and surface a
        real error, and only once that resolves does the *actual* download
-       fire, via a completely normal <a href> click (no `download`
-       attribute override). That native-download path is what matters: an
-       earlier version of this routed the real transfer through fetch()
-       and saved it from a blob: URL instead, which seemed equivalent but
-       silently broke the server's "VRC Content Manager/<filename>"
-       Content-Disposition subfolder trick -- Chromium only honors a slash
-       as a subfolder separator for a real navigation-style download, not
-       for a blob: URL's `download` attribute (confirmed the hard way: it
-       showed up as a flat file with the slash turned into an underscore).
-       Letting the browser drive the real download natively, HEAD-warmed
-       first, keeps both properties instead of trading one for the other.
-    */
+       fire.
+
+       That real download fires via `window.location.href = url`, not by
+       building a second <a> and clicking it (an earlier version did that,
+       and its own .click() re-entered this same capture-phase listener --
+       preventDefault() cancelled the real download, fired a new HEAD,
+       built ANOTHER relay <a>, and so on forever: an endless stream of
+       toasts and "downloaded" log lines with no file ever actually saved).
+       location.href never dispatches a click event at all, so that whole
+       bug class can't happen here regardless of what this listener does --
+       nothing to flag, exclude, or get wrong.
+
+       It still has to be a real navigation-style request rather than
+       fetch()+blob: Chromium only honors a slash in Content-Disposition's
+       filename as a Downloads subfolder separator ("VRC Content
+       Manager/<filename>") for that navigation-style download, not for a
+       blob: URL's `download` attribute (confirmed the hard way: it showed
+       up as a flat file with the slash turned into an underscore).
+       location.href keeps that property. */
     (function () {
       var DOWNLOAD_HREF_RE = /^\/api\/v1\/items\/\d+(\/files\/\d+)?\/download$/;
       var STATUS_MESSAGES = {
@@ -301,15 +308,7 @@
       // top-down before that stopPropagation() call exists to block anything.
       document.addEventListener("click", function (e) {
         var link = e.target.closest("a");
-        // The relay flag below is the fix for a real infinite-loop bug: the
-        // dynamically-created <a> clicked after a successful HEAD (below)
-        // has the exact same download href, so without this check its own
-        // .click() call re-enters this same capture-phase listener --
-        // preventDefault() cancels that real download, fires a new HEAD,
-        // creates ANOTHER relay <a>, clicks it, and so on forever (visible
-        // as an endless stream of toasts and of "downloaded" log lines with
-        // no file ever actually saved).
-        if (!link || link.dataset.vrcDownloadRelay || !DOWNLOAD_HREF_RE.test(link.getAttribute("href") || "")) return;
+        if (!link || !DOWNLOAD_HREF_RE.test(link.getAttribute("href") || "")) return;
         e.preventDefault();
 
         var url = link.getAttribute("href");
@@ -325,12 +324,7 @@
             if (!resp.ok) {
               throw new Error(STATUS_MESSAGES[resp.status] || ("ダウンロードに失敗しました(HTTP " + resp.status + ")"));
             }
-            var a = document.createElement("a");
-            a.href = url;
-            a.dataset.vrcDownloadRelay = "true";
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
+            window.location.href = url;
             window.Toast.update(toastId, {
               variant: "success", title: "ダウンロードしました", message: filename, duration: 4000,
             });
@@ -351,23 +345,27 @@
        htmx -- the edit panel, BOOTH-fetch OOB updates, bulk-edit panel. */
     (function () {
       function boxOf(el) { return el && el.closest ? el.closest("[data-combobox]") : null; }
-      function inputOf(box) { return box.querySelector("input"); }
+      // The typeahead box (multi mode) has two <input>s -- a hidden one
+      // holding the real comma-joined value, and the visible search field --
+      // so lookups here always prefer the visible one. Single-value mode
+      // still has just the one plain input, so the fallback covers it too.
+      function inputOf(box) { return box.querySelector(".js-combobox-typeahead") || box.querySelector("input"); }
+      function valueInputOf(box) { return box.querySelector(".js-combobox-value"); }
       function listOf(box) { return box.querySelector(".js-combobox-list"); }
       function isMulti(box) { return box.hasAttribute("data-combobox-multi"); }
+      function chipsOf(box) { return Array.from(box.querySelectorAll(".js-combobox-chip")); }
+      function chipValuesOf(box) { return chipsOf(box).map(function (c) { return c.dataset.value; }); }
 
-      function currentTerm(box) {
-        var value = inputOf(box).value;
-        if (!isMulti(box)) return value.trim();
-        var parts = value.split(",");
-        return parts[parts.length - 1].trim();
-      }
+      function currentTerm(box) { return inputOf(box).value.trim(); }
 
       function filterList(box) {
         var term = currentTerm(box).toLowerCase();
+        var selected = isMulti(box) ? chipValuesOf(box) : [];
         var options = listOf(box).querySelectorAll(".js-combobox-option");
         var anyVisible = false;
         options.forEach(function (li) {
-          var match = !term || li.dataset.value.toLowerCase().indexOf(term) !== -1;
+          var alreadyChipped = selected.indexOf(li.dataset.value) !== -1;
+          var match = !alreadyChipped && (!term || li.dataset.value.toLowerCase().indexOf(term) !== -1);
           li.classList.toggle("hidden", !match);
           li.setAttribute("aria-selected", "false");
           li.classList.remove("bg-accent/10", "dark:bg-accent-dark/10");
@@ -397,20 +395,64 @@
         if (visible[index]) visible[index].scrollIntoView({ block: "nearest" });
       }
 
-      function pickOption(box, value) {
-        var input = inputOf(box);
-        if (isMulti(box)) {
-          var parts = input.value.split(",").map(function (p) { return p.trim(); }).filter(Boolean);
-          parts.pop();
-          parts.push(value);
-          input.value = parts.join(", ") + ", ";
-        } else {
-          input.value = value;
+      // Fires after every chip add/remove so anything downstream that
+      // depends on the field's value stays in sync: the filter form's
+      // hx-trigger="change" (re-runs search live) and the item table's
+      // inline-edit cell hx-post (see items/_inline_edit_cell.html), which
+      // reads this same hidden input's value directly. Deliberately does
+      // NOT dispatch focusout here -- that fires separately, once, only
+      // when focus actually leaves the whole widget (see the delegated
+      // focusout listener below) so autosave/save-and-close consumers (the
+      // item edit panel, the inline-edit cell) commit once you're done
+      // editing rather than after every single chip.
+      function syncChips(box) {
+        var hidden = valueInputOf(box);
+        if (!hidden) return;
+        hidden.value = chipValuesOf(box).join(", ");
+        hidden.dispatchEvent(new Event("input", { bubbles: true }));
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+
+      function addChip(box, value) {
+        value = value.trim();
+        if (!value || chipValuesOf(box).indexOf(value) !== -1) {
+          inputOf(box).value = "";
+          return;
         }
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
+        var chip = document.createElement("span");
+        chip.className = "js-combobox-chip inline-flex items-center gap-1 rounded-full bg-accent/10 dark:bg-accent-dark/10 text-accent dark:text-accent-dark pl-2.5 pr-1 py-0.5 text-xs font-medium";
+        chip.dataset.value = value;
+        var label = document.createElement("span");
+        label.textContent = value;
+        var removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "js-combobox-chip-remove inline-flex items-center justify-center min-h-5 min-w-5 w-5 h-5 rounded-full hover:bg-accent/20 dark:hover:bg-accent-dark/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent dark:focus-visible:outline-accent-dark";
+        removeBtn.setAttribute("aria-label", "「" + value + "」を削除");
+        removeBtn.innerHTML = '<span class="icon text-[0.85rem]" aria-hidden="true">close</span>';
+        chip.appendChild(label);
+        chip.appendChild(removeBtn);
+        inputOf(box).before(chip);
+        inputOf(box).value = "";
+        syncChips(box);
+      }
+
+      function removeChip(box, chip) {
+        chip.remove();
+        syncChips(box);
+        inputOf(box).focus();
+      }
+
+      function pickOption(box, value) {
+        if (isMulti(box)) {
+          addChip(box, value);
+        } else {
+          var input = inputOf(box);
+          input.value = value;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        }
         closeList(box);
-        input.focus();
+        inputOf(box).focus();
       }
 
       document.addEventListener("input", function (e) {
@@ -427,11 +469,32 @@
         var box = boxOf(e.target);
         if (!box) return;
         setTimeout(function () {
-          if (!box.contains(document.activeElement)) closeList(box);
+          if (box.contains(document.activeElement)) return; // focus moved within the box (e.g. to a chip's remove button) -- not really leaving yet
+          closeList(box);
+          // The one moment a multi box's hidden value input gets a real
+          // focusout dispatched on it: actually leaving the whole widget,
+          // not any single chip add/remove (see syncChips above). Not
+          // bubbled -- the table's inline-edit cell has hx-trigger="focusout"
+          // directly on this hidden input (see items/_inline_edit_cell.html)
+          // and only needs the target itself to see it; the item edit
+          // panel's own form-level autosave trigger is already satisfied by
+          // the typeahead's own real, naturally-bubbling blur, so bubbling
+          // this one too would just fire that save a second time for
+          // nothing.
+          var hidden = isMulti(box) && valueInputOf(box);
+          if (hidden) hidden.dispatchEvent(new FocusEvent("focusout", { bubbles: false }));
         }, 0);
       });
 
       document.addEventListener("mousedown", function (e) {
+        var removeBtn = e.target.closest(".js-combobox-chip-remove");
+        if (removeBtn) {
+          e.preventDefault(); // keep focus on the typeahead input, not lost to the button
+          var chip = removeBtn.closest(".js-combobox-chip");
+          var box = boxOf(removeBtn);
+          if (box && chip) removeChip(box, chip);
+          return;
+        }
         var li = e.target.closest(".js-combobox-option");
         if (!li) return;
         e.preventDefault(); // keep focus on the input rather than losing it to the option
@@ -441,24 +504,49 @@
       document.addEventListener("keydown", function (e) {
         var box = boxOf(e.target.closest("[data-combobox] input"));
         if (!box) return;
+
+        // Backspace on an empty typeahead removes the most recently added
+        // chip -- the standard "tag input" convention -- but only when
+        // there's no text to fall back to normal in-field deletion.
+        if (isMulti(box) && e.key === "Backspace" && currentTerm(box) === "") {
+          var chips = chipsOf(box);
+          if (chips.length) {
+            e.preventDefault();
+            removeChip(box, chips[chips.length - 1]);
+          }
+          return;
+        }
+
         var list = listOf(box);
         if (list.classList.contains("hidden")) {
           if (e.key === "ArrowDown") openList(box);
+          else if (isMulti(box) && (e.key === "Enter" || e.key === ",") && currentTerm(box)) {
+            // No suggestion is open to pick from -- e.g. typing a brand new
+            // tag that doesn't exist yet -- so commit the typed text as-is.
+            e.preventDefault();
+            addChip(box, currentTerm(box));
+          }
           return;
         }
         var visible = Array.from(list.querySelectorAll(".js-combobox-option:not(.hidden)"));
-        if (!visible.length) return;
         var activeIndex = visible.findIndex(function (li) { return li.getAttribute("aria-selected") === "true"; });
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          setActive(visible, Math.min(activeIndex + 1, visible.length - 1));
+          if (visible.length) setActive(visible, Math.min(activeIndex + 1, visible.length - 1));
         } else if (e.key === "ArrowUp") {
           e.preventDefault();
-          setActive(visible, Math.max(activeIndex - 1, 0));
-        } else if (e.key === "Enter") {
+          if (visible.length) setActive(visible, Math.max(activeIndex - 1, 0));
+        } else if (e.key === "Enter" || (e.key === "," && isMulti(box))) {
+          // "," only ever reaches here for a multi box -- a single-value
+          // box (e.g. shop_name, free text) must never treat a literal
+          // comma the user is typing as a commit key, even while a
+          // suggestion happens to be arrow-key-highlighted.
           if (activeIndex >= 0) {
             e.preventDefault();
             pickOption(box, visible[activeIndex].dataset.value);
+          } else if (isMulti(box) && currentTerm(box)) {
+            e.preventDefault();
+            addChip(box, currentTerm(box));
           }
         } else if (e.key === "Escape") {
           closeList(box);

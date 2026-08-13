@@ -1,4 +1,13 @@
 <div class="rounded-3xl border border-dashed border-slate-300/70 dark:border-white/15 bg-white/30 dark:bg-slate-900/30 backdrop-blur-xl p-8 text-center text-slate-600 dark:text-slate-400">
+  {# Without this, deleting an item from the mobile slide-over (see
+     list.html's #detail-panel) swaps this fragment in with no on-screen way
+     to close the panel again -- backdrop-tap/Escape still work, but a
+     keyboard/screen-reader user whose focus was on the just-used delete
+     button has nothing to land on. Mirrors items/_detail_panel.html's own
+     close button exactly (same class, same behavior, lg:hidden). #}
+  <button type="button" class="js-close-detail lg:hidden ml-auto mb-2 flex items-center justify-center min-h-9 min-w-9 w-9 h-9 rounded-full text-slate-500 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-white/10 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent dark:focus-visible:outline-accent-dark" aria-label="閉じる">
+    <span class="icon" aria-hidden="true">close</span>
+  </button>
   <span class="icon text-3xl" aria-hidden="true">touch_app</span>
   <p class="text-sm mt-2">商品を選択すると詳細が表示されます</p>
 </div>

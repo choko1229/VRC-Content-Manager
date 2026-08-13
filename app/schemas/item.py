@@ -121,6 +121,19 @@ class ItemFileRead(BaseModel):
     size_bytes: int
 
 
+class ItemGroupSibling(BaseModel):
+    """One other item sharing the anchor row's BoothURL -- see
+    item_service._group_by_product_url. Deliberately thin (not a nested
+    ItemListRow): just enough to render a compact "also available for..."
+    entry without duplicating every field of a full row."""
+
+    id: int
+    name: str
+    avatars: list[str]
+    has_thumbnail: bool
+    file_status: FileStatus | None
+
+
 class ItemListRow(BaseModel):
     id: int
     name: str
@@ -138,6 +151,12 @@ class ItemListRow(BaseModel):
     file_status: FileStatus | None
     primary_file_name: str | None
     attachment_files: list[ItemFileRead]
+    product_url: str | None
+    # Other items sharing this row's product_url (see
+    # item_service._group_by_product_url) -- e.g. the same BOOTH product
+    # downloaded once per compatible avatar. Empty for a row with no
+    # product_url, or whose product_url is unique among the current results.
+    group_siblings: list[ItemGroupSibling]
 
 
 class UpdateHistoryRead(BaseModel):

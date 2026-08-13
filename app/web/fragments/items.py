@@ -224,6 +224,32 @@ async def refresh_item_from_booth_fragment(request: Request, item_id: int, db: S
     return response
 
 
+@router.post("/{item_id}/quick-booth-url", dependencies=[Depends(verify_csrf)])
+async def quick_booth_url_fragment(
+    request: Request, item_id: int, product_url: str = Form(...), db: Session = Depends(get_db)
+):
+    """One BoothURL field per freshly-uploaded item in the TOP page's
+    post-upload panel (see list.html) -- links + auto-fills that one item in
+    a single request, without opening its full edit panel. See
+    item_service.apply_booth_url."""
+    try:
+        detail, fetched_ok = await run_in_threadpool(item_service.apply_booth_url, db, item_id, product_url)
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="商品が見つかりません。")
+    except AppValidationError as exc:
+        return templates.TemplateResponse(
+            request, "items/_quick_booth_url_result.html", {"item_id": item_id, "error": str(exc), "item": None}
+        )
+
+    response = templates.TemplateResponse(
+        request,
+        "items/_quick_booth_url_result.html",
+        {"item_id": item_id, "error": None, "item": detail, "fetched_ok": fetched_ok},
+    )
+    response.headers["HX-Trigger"] = "item-saved"
+    return response
+
+
 def _edit_panel_context(
     db: Session,
     item_id: int,

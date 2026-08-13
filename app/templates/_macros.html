@@ -64,13 +64,44 @@
 {% macro combobox_field(name, label, options, value="", required=False, help_text=none, placeholder=none, multi=False, extra="", attrs="") %}
 {# Custom-styled autocomplete, replacing native <datalist> (which renders as
    an unstyled OS popup that clashes with the glass UI and is hard to read).
-   `multi=True` treats the field as a comma-separated list (e.g. tags):
-   filtering matches the text after the last comma, and picking an option
-   appends rather than replaces. Behavior is wired up once, globally, by the
-   delegated listeners in base.html (data-combobox) -- no per-instance JS
-   needed, so this also works inside htmx-swapped-in fragments. #}
+   `multi=True` renders already-picked values as removable chips instead of
+   comma-separated text in a single field: a hidden input (id "f-{name}",
+   matching the plain single-value field's id so existing JS reading
+   ".value" for the full CSV -- e.g. list.html's bulk-apply handler -- keeps
+   working unchanged) holds the real comma-joined value, and a separate
+   visible text input alongside the chips is only ever a search/typeahead
+   box, never submitted itself (no name attribute). Behavior is wired up
+   once, globally, by the delegated listeners in base.html (data-combobox)
+   -- no per-instance JS needed, so this also works inside htmx-swapped-in
+   fragments. #}
 {% set field_id = "f-" + name %}
-<div class="relative {{ extra }}" data-combobox {% if multi %}data-combobox-multi{% endif %}>
+{% if multi %}
+{% set chip_values = value.split(",") | map("trim") | select | list %}
+<div class="relative {{ extra }}" data-combobox data-combobox-multi>
+  {{ label_for(field_id ~ "-input", label, required, help_text) }}
+  <input type="hidden" id="{{ field_id }}" class="js-combobox-value" name="{{ name }}" value="{{ value }}" {% if required %}required{% endif %}>
+  <div class="js-combobox-chipbox flex flex-wrap items-center gap-1.5 w-full min-h-11 mt-1.5 px-2.5 py-1.5 rounded-xl border border-slate-300/70 dark:border-white/15 bg-white/70 dark:bg-white/5 focus-within:ring-2 focus-within:ring-accent dark:focus-within:ring-accent-dark focus-within:border-accent dark:focus-within:border-accent-dark transition">
+    {% for v in chip_values %}
+    <span class="js-combobox-chip inline-flex items-center gap-1 rounded-full bg-accent/10 dark:bg-accent-dark/10 text-accent dark:text-accent-dark pl-2.5 pr-1 py-0.5 text-xs font-medium" data-value="{{ v }}">
+      <span>{{ v }}</span>
+      <button type="button" class="js-combobox-chip-remove inline-flex items-center justify-center min-h-5 min-w-5 w-5 h-5 rounded-full hover:bg-accent/20 dark:hover:bg-accent-dark/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent dark:focus-visible:outline-accent-dark" aria-label="「{{ v }}」を削除">
+        <span class="icon text-[0.85rem]" aria-hidden="true">close</span>
+      </button>
+    </span>
+    {% endfor %}
+    <input id="{{ field_id }}-input" type="text" autocomplete="off"
+           role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="{{ field_id }}-listbox"
+           {% if placeholder %}placeholder="{{ placeholder }}"{% endif %} {{ attrs|safe }}
+           class="js-combobox-typeahead flex-1 min-w-[6rem] bg-transparent border-0 p-0.5 outline-none focus:ring-0 text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500">
+  </div>
+  <ul id="{{ field_id }}-listbox" role="listbox" class="js-combobox-list hidden absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-white/70 dark:border-white/10 bg-white/90 dark:bg-slate-900/90 backdrop-blur-2xl shadow-xl shadow-slate-300/40 dark:shadow-black/40 py-1 text-sm">
+    {% for opt in options %}
+    <li role="option" data-value="{{ opt }}" class="js-combobox-option px-3 py-2 cursor-pointer text-slate-700 dark:text-slate-200 hover:bg-accent/10 dark:hover:bg-accent-dark/10 aria-selected:bg-accent/10 dark:aria-selected:bg-accent-dark/10">{{ opt }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% else %}
+<div class="relative {{ extra }}" data-combobox>
   {{ label_for(field_id, label, required, help_text) }}
   <input id="{{ field_id }}" type="text" name="{{ name }}" value="{{ value }}" autocomplete="off"
          role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="{{ field_id }}-listbox"
@@ -82,6 +113,7 @@
     {% endfor %}
   </ul>
 </div>
+{% endif %}
 {% endmacro %}
 
 {% macro oob_field_value(field_id, name, value, type="text", required=False, list_id=none) %}

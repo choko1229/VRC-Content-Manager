@@ -26,6 +26,7 @@ from app.services import (
     file_content_service,
     item_service,
     oauth_service,
+    saved_filter_service,
     shop_service,
     tag_service,
     upload_service,
@@ -70,6 +71,7 @@ def _items_list_context(
         "category_options": item_service.CATEGORY_OPTIONS,
         "tag_names": tag_service.list_tag_names(db),
         "avatar_names": avatar_service.list_avatar_names(db),
+        "saved_filters": saved_filter_service.list_saved_filters(db),
         "filters": {
             "q": params.get("q", ""),
             "tags": params.get("tags", ""),
@@ -85,6 +87,7 @@ def _items_list_context(
         "allowed_extensions": ", ".join(sorted(DEFAULT_ALLOWED_EXTENSIONS)),
         "max_upload_size_mb": app_config_service.get_max_upload_size_mb(db),
         "chunk_size_mb": chunked_upload_service.CHUNK_SIZE_MB,
+        "pending_sync_count": item_service.count_pending_sync(db),
     }
 
 

@@ -18,6 +18,7 @@ from app.services import (
     drive_sync_service,
     oauth_service,
     shop_service,
+    tag_service,
 )
 from app.web.templating import templates
 
@@ -121,6 +122,7 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
             "booth_library_synced_at": app_settings_service.get_setting(db, "booth_library_synced_at"),
             "booth_library_item_count": booth_library_service.library_size(db),
             "shops": shop_service.list_shops(db),
+            "tags": tag_service.list_tags(db),
             "root_folder_name": folder_layout.ROOT_FOLDER_NAME,
             "oauth_error": None,
             "password_error": None,
@@ -220,6 +222,7 @@ def _settings_response(
             "booth_library_synced_at": app_settings_service.get_setting(db, "booth_library_synced_at"),
             "booth_library_item_count": booth_library_service.library_size(db),
             "shops": shop_service.list_shops(db),
+            "tags": tag_service.list_tags(db),
             "root_folder_name": folder_layout.ROOT_FOLDER_NAME,
             "oauth_error": oauth_error,
             "password_error": password_error,
